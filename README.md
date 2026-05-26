@@ -187,8 +187,9 @@ Core contributors: Zheng Wang, Shenzhi Wang, Yue Wu, Shiji Song, Gao Huang
 ```
 @misc{wang2026telos-agent,
   title        = {Telos: A Cost-Aware Inference Infrastructure for AI Agent},
-  author       = {Zheng Wang, Shenzhi Wang, HongTao Zhong, Shiji Song, Gao Huang},
+  author       = {Zheng Wang$^{*}$ and Shenzhi Wang$^{*}$ and HongTao Zhong$^{*}$ and Shiji Song and Gao Huang},
   howpublished = {\url{https://github.com/learningCatHD/telos-sdk}},
+  note         = {$^{*}$These authors contributed equally to this work.},
   year         = {2026}
 }
 ```
