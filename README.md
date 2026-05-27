@@ -129,28 +129,29 @@ Opens an offline HTML dashboard in your browser showing savings per call in abso
 
 ## ⬢ &nbsp;SWE-bench Verified — TELOS does not regress task correctness
 
-Token savings are only useful if the agent still solves the problem. We ran a pre-registered A/B on **SWE-bench Verified** with the Hermes harness and `deepseek/deepseek-v4-flash` — 100 instances per arm, seeded sample across 8 repos (sphinx, matplotlib, xarray, pytest, requests, pylint, seaborn, flask). 55 instances per arm were graded under the official Docker harness (the rest were excluded only due to local image-cache gaps and a transient `raw.githubusercontent.com` proxy outage on matplotlib).
+Token savings are only useful if the agent still solves the problem. We ran a pre-registered A/B on **SWE-bench Verified** with the Hermes harness and `deepseek/deepseek-v4-flash` — 100 instances per arm, seeded sample across 8 repos (sphinx, matplotlib, xarray, pytest, requests, pylint, seaborn, flask). **99 instances per arm were graded under the official Docker harness** (1 instance excluded due to a missing per-instance docker image upstream).
 
-#### Resolved rate (docker-graded, n=55/arm)
+#### Resolved rate (docker-graded, n=99/arm, paired)
 
 | Arm | Resolved | Rate | 95% Wilson CI |
 |---|---:|---:|---|
-| **TELOS** | 23 / 55 | **41.8%** | [29.7%, 55.0%] |
-| Vanilla | 25 / 55 | 45.5% | [33.0%, 58.5%] |
+| **TELOS** | 45 / 99 | **45.5%** | [36.0%, 55.2%] |
+| Vanilla | 42 / 99 | 42.4% | [33.2%, 52.3%] |
 
-Paired McNemar on the 34 instances both arms completed: 2 TELOS-only solves vs. 1 vanilla-only solve, exact two-sided **p ≈ 1.00** — statistically **indistinguishable**.
+Paired 2×2 on the same 99 instances: both resolved 33; TELOS-only 12; vanilla-only 9; neither 45. Exact McNemar two-sided **p = 0.66** — the +3 pp absolute gap is **not statistically significant**, i.e. TELOS does not regress resolved rate at this sample size.
 
-#### Token efficiency (agent-side, n=100/arm)
+#### Token efficiency (agent-side, n=99/arm, same instances)
 
 | Per-task | TELOS | Vanilla | Δ |
 |---|---:|---:|---:|
-| **raw_input** (billed) | 92,853 | 196,934 | **−52.8%** |
-| input_total (raw + cache) | 349,349 | 511,179 | −31.7% |
-| output | 24,747 | 24,986 | −1.0% |
-| api_calls | 32.4 | 31.9 | +1.5% |
+| **new_input** (post-cache, billed) | 93,712 | 198,706 | **−52.8%** |
+| prompt_tokens (raw + cache) | 352,400 | 515,953 | −31.7% |
+| output_tokens | 24,975 | 25,218 | −1.0% |
+| api_calls | 32.6 | 32.1 | +1.4% |
 | **cache_share** | **73.4%** | 61.5% | **+11.9 pp** |
+| reported cost (USD) | $2.29 | $3.85 | **−40.5%** |
 
-**Read this honestly.** On a 55-instance subset the 95% CI is ±12 pp wide — this run can rule out an absolute regression worse than ~13 pp at 95% confidence, but not pin Δ to ±5 pp. What it does show, with high confidence, is the **input-token bill is roughly halved at the same correctness band**. A larger run (n ≥ 400/arm) is on the roadmap to tighten the resolved-rate confidence interval.
+**Read this honestly.** The 99-instance subset gives a Wilson CI of roughly ±10 pp on each arm. This run can rule out an absolute regression worse than ~6 pp at 95% confidence (the lower bound of the paired difference), but cannot pin Δ to ±2 pp. What it shows with high confidence is the **input-token bill is roughly halved, and end-to-end cost drops ~40%, at the same correctness band**. A larger run (n ≥ 400/arm) is on the roadmap to tighten the resolved-rate confidence interval further.
 
 <sub>Raw outputs: agent runs in [`/tmp/telos-ab-n100/{with,without}/`](/tmp/telos-ab-n100/), docker-graded reports in [`/tmp/telos-ab-n100/docker-eval/`](/tmp/telos-ab-n100/docker-eval/). Reproduce: `scripts/run_swebench_batch.py -n 100 --seed 7`. Full technical report (pre-registered design, statistical detail, related work): [docs/2026-05-26-swebench-ab.md](docs/2026-05-26-swebench-ab.md).</sub>
 

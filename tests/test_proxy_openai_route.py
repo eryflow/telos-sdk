@@ -342,6 +342,216 @@ async def _test_per_slug_upstream_url_is_honored() -> None:
         await up_b_runner.cleanup()
 
 
+async def _test_openai_responses_passthrough_streams() -> None:
+    """Codex uses ``wire_api = "responses"``; the installer maps it onto
+    ``/upstreams/openai/v1/responses``. The endpoint is SSE: the gateway must
+    forward chunk-by-chunk instead of buffering the whole stream (which would
+    either hang or deliver the transcript as one trailing blob).
+
+    The test also verifies the openai-specific request headers Codex sends
+    (``OpenAI-Beta``, ``Authorization``) reach the upstream — without them the
+    Responses endpoint 400s even when the slug routing is correct.
+    """
+    sent_chunks: list[bytes] = []
+    received_headers: dict[str, str] = {}
+
+    async def responses_handler(request: web.Request) -> web.StreamResponse:
+        received_headers.update(dict(request.headers))
+        # Emit a slow trickle so any buffering on the gateway shows up as a
+        # noticeable delay between the first and last chunk on the client side.
+        response = web.StreamResponse(
+            status=200,
+            headers={"Content-Type": "text/event-stream"},
+        )
+        await response.prepare(request)
+        chunks = [
+            b'event: response.created\ndata: {"id":"resp_1"}\n\n',
+            b'event: response.output_text.delta\ndata: {"delta":"hello"}\n\n',
+            b'event: response.completed\ndata: {"id":"resp_1","status":"completed"}\n\n',
+        ]
+        for c in chunks:
+            sent_chunks.append(c)
+            await response.write(c)
+            await asyncio.sleep(0.02)
+        await response.write_eof()
+        return response
+
+    up_app = web.Application()
+    up_app.router.add_post("/v1/responses", responses_handler)
+    up_runner = web.AppRunner(up_app)
+    await up_runner.setup()
+    up_site = web.TCPSite(up_runner, "127.0.0.1", 0)
+    await up_site.start()
+    up_port = up_site._server.sockets[0].getsockname()[1]
+    up_url = f"http://127.0.0.1:{up_port}"
+
+    upstreams = {
+        "openai": UpstreamConfig(
+            url=up_url, engine="openai", protocol="openai-chat",
+        ),
+    }
+    app = make_app(upstream="http://unused", upstreams=upstreams)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    px_port = site._server.sockets[0].getsockname()[1]
+    px_url = f"http://127.0.0.1:{px_port}"
+
+    import time as _time
+
+    try:
+        first_chunk_at: float | None = None
+        last_chunk_at: float | None = None
+        received = b""
+        async with aiohttp.ClientSession() as client:
+            async with client.post(
+                f"{px_url}/upstreams/openai/v1/responses",
+                json={"model": "gpt-5.5", "input": "hi", "stream": True},
+                headers={
+                    "authorization": "Bearer sk-test",
+                    "openai-beta": "responses=v1",
+                    "accept": "text/event-stream",
+                },
+            ) as resp:
+                assert resp.status == 200, await resp.text()
+                ct = resp.headers.get("Content-Type", "")
+                assert "text/event-stream" in ct, ct
+                async for chunk in resp.content.iter_any():
+                    now = _time.monotonic()
+                    if first_chunk_at is None:
+                        first_chunk_at = now
+                    last_chunk_at = now
+                    received += chunk
+
+        # All three SSE events came through.
+        assert b"response.created" in received
+        assert b"response.output_text.delta" in received
+        assert b"response.completed" in received
+
+        # Streaming check: with three 20ms-apart chunks, the gap between the
+        # first chunk arriving and the last should be at least ~40ms. A buffered
+        # implementation would show ~0 gap (everything arrives at once at the
+        # end of the upstream).
+        assert first_chunk_at is not None and last_chunk_at is not None
+        assert last_chunk_at - first_chunk_at >= 0.02, (
+            f"chunks arrived too close together "
+            f"({last_chunk_at - first_chunk_at:.3f}s) — likely buffered"
+        )
+
+        # Codex's auth + Responses-API beta header reached upstream.
+        auth = next(
+            (v for k, v in received_headers.items() if k.lower() == "authorization"),
+            None,
+        )
+        assert auth == "Bearer sk-test"
+        beta = next(
+            (v for k, v in received_headers.items() if k.lower() == "openai-beta"),
+            None,
+        )
+        assert beta == "responses=v1"
+        print("✓ test_openai_responses_passthrough_streams")
+    finally:
+        await runner.cleanup()
+        await up_runner.cleanup()
+
+
+async def _test_openai_responses_logs_usage(tmp_log: Path) -> None:
+    """The Responses-API endpoint must produce a usage_log entry so the
+    dashboard sees Codex traffic. The terminal SSE event
+    ``response.completed`` carries ``response.usage`` — the gateway parses
+    that out and writes a normalized record tagged with the slug's ``via``
+    (``"codex"``), which is what the dashboard groups by.
+    """
+    async def responses_handler(request: web.Request) -> web.StreamResponse:
+        response = web.StreamResponse(
+            status=200,
+            headers={"Content-Type": "text/event-stream"},
+        )
+        await response.prepare(request)
+        chunks = [
+            b'event: response.created\ndata: {"id":"resp_x"}\n\n',
+            b'event: response.output_text.delta\ndata: {"delta":"Hi"}\n\n',
+            b'event: response.completed\n'
+            b'data: {"type":"response.completed","response":{"id":"resp_x",'
+            b'"status":"completed","usage":{"input_tokens":1000,'
+            b'"input_tokens_details":{"cached_tokens":800},'
+            b'"output_tokens":42,"total_tokens":1042}}}\n\n',
+        ]
+        for c in chunks:
+            await response.write(c)
+        await response.write_eof()
+        return response
+
+    up_app = web.Application()
+    up_app.router.add_post("/responses", responses_handler)
+    up_runner = web.AppRunner(up_app)
+    await up_runner.setup()
+    up_site = web.TCPSite(up_runner, "127.0.0.1", 0)
+    await up_site.start()
+    up_port = up_site._server.sockets[0].getsockname()[1]
+    up_url = f"http://127.0.0.1:{up_port}"
+
+    upstreams = {
+        # Mirrors the installer's chatgpt-mode slug: no /v1 in the URL,
+        # via="codex" labels traffic for the dashboard breakdown.
+        "codex-chatgpt": UpstreamConfig(
+            url=up_url, engine="openai", protocol="openai-chat", via="codex",
+        ),
+    }
+    app = make_app(upstream="http://unused", upstreams=upstreams,
+                    usage_log=tmp_log)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    px_port = site._server.sockets[0].getsockname()[1]
+    px_url = f"http://127.0.0.1:{px_port}"
+
+    try:
+        async with aiohttp.ClientSession() as client:
+            async with client.post(
+                f"{px_url}/upstreams/codex-chatgpt/responses",
+                json={"model": "gpt-5.5", "input": "hi", "stream": True},
+                headers={"authorization": "Bearer sk-test",
+                         "x-telos-session": "codex-log"},
+            ) as resp:
+                assert resp.status == 200
+                async for _ in resp.content.iter_any():
+                    pass
+
+        line = tmp_log.read_text().strip().splitlines()[-1]
+        record = json.loads(line)
+        assert record["session_id"] == "codex-log"
+        # The crucial assertion: the dashboard's "by harness" sees codex.
+        assert record["harness"] == "codex"
+        # Responses-API usage normalization: cached → cache_read,
+        # input - cached → raw_input, output_tokens → output.
+        assert record["normalized"]["cache_read"] == 800
+        assert record["normalized"]["raw_input"] == 200
+        assert record["normalized"]["output"] == 42
+        # Raw usage round-trips for debugging / future reprocessing.
+        assert record["raw_usage"]["input_tokens"] == 1000
+        print("✓ test_openai_responses_logs_usage")
+    finally:
+        await runner.cleanup()
+        await up_runner.cleanup()
+
+
+async def _test_openai_slug_in_defaults() -> None:
+    """Regression: ``codex`` writes ``/upstreams/openai/v1`` as its base_url; the
+    gateway therefore must ship with an ``openai`` slug in the default upstream
+    table, otherwise the very first Codex request returns
+    ``unknown upstream slug: 'openai'``.
+    """
+    from telos.config import default_upstreams
+    defaults = default_upstreams()
+    assert "openai" in defaults, sorted(defaults)
+    assert defaults["openai"].url == "https://api.openai.com"
+    assert defaults["openai"].engine == "openai"
+    print("✓ test_openai_slug_in_defaults")
+
+
 async def _test_anthropic_route_still_works() -> None:
     """Regression: registering the /upstreams/<slug>/<tail> route must NOT
     swallow the legacy /v1/messages handler.
@@ -409,6 +619,9 @@ async def _run_all(tmp_log: Path) -> None:
     await _test_openai_route_streaming()
     await _test_unknown_slug_returns_404()
     await _test_per_slug_upstream_url_is_honored()
+    await _test_openai_slug_in_defaults()
+    await _test_openai_responses_passthrough_streams()
+    await _test_openai_responses_logs_usage(tmp_log)
     await _test_anthropic_route_still_works()
 
 

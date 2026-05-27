@@ -128,28 +128,29 @@ telos dashboard
 
 ## ⬢ &nbsp;SWE-bench Verified —— TELOS 不会牺牲任务正确率
 
-token 省下来才有意义，前提是 agent 还能把题做对。我们在 **SWE-bench Verified** 上做了一次预先登记的 A/B：Hermes harness + `deepseek/deepseek-v4-flash`，每臂 100 个实例，种子化抽样覆盖 8 个仓库（sphinx、matplotlib、xarray、pytest、requests、pylint、seaborn、flask）。每臂中 55 个实例进入官方 Docker harness 评测（其余实例仅因本地镜像缓存缺口与 matplotlib 的一次 `raw.githubusercontent.com` 代理瞬断而排除）。
+token 省下来才有意义，前提是 agent 还能把题做对。我们在 **SWE-bench Verified** 上做了一次预先登记的 A/B：Hermes harness + `deepseek/deepseek-v4-flash`，每臂 100 个实例，种子化抽样覆盖 8 个仓库（sphinx、matplotlib、xarray、pytest、requests、pylint、seaborn、flask）。**每臂 99 个实例进入官方 Docker harness 评测**（1 个实例因上游缺失对应 docker 镜像而排除）。
 
-#### 修复率（docker 评测，n=55/臂）
+#### 修复率（docker 评测，n=99/臂，配对）
 
 | Arm | Resolved | 修复率 | 95% Wilson CI |
 |---|---:|---:|---|
-| **TELOS** | 23 / 55 | **41.8%** | [29.7%, 55.0%] |
-| Vanilla | 25 / 55 | 45.5% | [33.0%, 58.5%] |
+| **TELOS** | 45 / 99 | **45.5%** | [36.0%, 55.2%] |
+| Vanilla | 42 / 99 | 42.4% | [33.2%, 52.3%] |
 
-在双方都跑完的 34 个实例上做配对 McNemar：TELOS 独解 2，vanilla 独解 1，双侧精确 **p ≈ 1.00** —— 统计上**无法区分**。
+在同一组 99 个实例上做配对 2×2：两臂都解出 33；仅 TELOS 解出 12；仅 vanilla 解出 9；都没解出 45。精确 McNemar 双侧 **p = 0.66** —— +3 pp 的绝对差异**未达统计显著**，即 TELOS 在该样本量下不会回归修复率。
 
-#### Token 效率（agent 端，n=100/臂）
+#### Token 效率（agent 端，n=99/臂，相同实例）
 
 | 每任务 | TELOS | Vanilla | Δ |
 |---|---:|---:|---:|
-| **raw_input**（计费） | 92,853 | 196,934 | **-52.8%** |
-| input_total（raw + cache） | 349,349 | 511,179 | -31.7% |
-| output | 24,747 | 24,986 | -1.0% |
-| api_calls | 32.4 | 31.9 | +1.5% |
+| **new_input**（去缓存后，计费） | 93,712 | 198,706 | **-52.8%** |
+| prompt_tokens（raw + cache） | 352,400 | 515,953 | -31.7% |
+| output_tokens | 24,975 | 25,218 | -1.0% |
+| api_calls | 32.6 | 32.1 | +1.4% |
 | **cache_share** | **73.4%** | 61.5% | **+11.9 pp** |
+| 上报成本 (USD) | $2.29 | $3.85 | **-40.5%** |
 
-**诚实读这份数据：** 55 个实例的 95% CI 宽度约 ±12 pp，本次运行可以在 95% 置信下排除超过约 13 pp 的回归，但还无法把 Δ 钉到 ±5 pp 以内。能高置信确认的是 —— **在同一修复率区间下，计费输入 token 大约减半**。路线图上有 n ≥ 400/臂 的复跑计划，用来把修复率的置信区间收窄。
+**诚实读这份数据：** 99 个实例的 Wilson CI 宽度约 ±10 pp。本次运行可以在 95% 置信下排除超过约 6 pp 的绝对回归（配对差的下界），但还无法把 Δ 钉到 ±2 pp 以内。能高置信确认的是 —— **在同一修复率区间下，计费输入 token 大约减半，端到端成本下降 ~40%**。路线图上有 n ≥ 400/臂 的复跑计划，用来把修复率的置信区间进一步收窄。
 
 <sub>原始产物：agent 运行在 [`/tmp/telos-ab-n100/{with,without}/`](/tmp/telos-ab-n100/)，docker 评测报告在 [`/tmp/telos-ab-n100/docker-eval/`](/tmp/telos-ab-n100/docker-eval/)。复现命令：`scripts/run_swebench_batch.py -n 100 --seed 7`。完整技术报告（预先登记设计、统计细节、相关工作）见 [docs/2026-05-26-swebench-ab.md](docs/2026-05-26-swebench-ab.md)。</sub>
 

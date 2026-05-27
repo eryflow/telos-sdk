@@ -67,6 +67,12 @@ _DEFAULT_UPSTREAM = "https://api.anthropic.com"
 
 # Headers preserved when forwarding to upstream (auth / protocol version / Anthropic private beta).
 # Host / Content-Length are computed by aiohttp itself; do not pass them through from the client.
+# The OpenAI-side entries (``openai-*``, ``chatgpt-*``, ``session_id``, ``originator``) are
+# needed by Codex's Responses API: ``codex`` attaches ``OpenAI-Beta: responses=v1``, an
+# ``OpenAI-Organization`` / ``OpenAI-Project`` for billing routing, and proprietary
+# ``ChatGPT-Account-Id`` / ``session_id`` / ``originator`` headers that the Responses
+# endpoint relies on for conversation state. Dropping them caused the OpenAI server to
+# 400 even when the slug routing was correct.
 _FORWARD_HEADER_WHITELIST = (
     "x-api-key",
     "authorization",
@@ -74,6 +80,12 @@ _FORWARD_HEADER_WHITELIST = (
     "anthropic-beta",
     "anthropic-dangerous-direct-browser-access",
     "user-agent",
+    "openai-organization",
+    "openai-project",
+    "openai-beta",
+    "chatgpt-account-id",
+    "session_id",
+    "originator",
 )
 
 _log = logging.getLogger("telos.proxy")
@@ -239,6 +251,27 @@ def _normalize_openai_usage(u: Mapping[str, Any]) -> dict[str, int]:
         "cache_read": cached,
         "cache_write": 0,
         "output": int(u.get("completion_tokens") or 0),
+    }
+
+
+def _normalize_responses_usage(u: Mapping[str, Any]) -> dict[str, int]:
+    """OpenAI Responses API usage → the same 4-bucket schema.
+
+    Responses API uses ``input_tokens`` plus an optional
+    ``input_tokens_details.cached_tokens`` (Codex-style traffic through
+    chatgpt.com keeps the same shape). There is no cache-write concept on
+    this endpoint, so that bucket is always 0. ``output_tokens`` covers both
+    visible output and reasoning tokens — the dashboard pays per these.
+    """
+    if not u:
+        return {"raw_input": 0, "cache_read": 0, "cache_write": 0, "output": 0}
+    it = int(u.get("input_tokens") or 0)
+    cached = int((u.get("input_tokens_details") or {}).get("cached_tokens", 0))
+    return {
+        "raw_input": max(it - cached, 0),
+        "cache_read": cached,
+        "cache_write": 0,
+        "output": int(u.get("output_tokens") or 0),
     }
 
 
@@ -1207,6 +1240,16 @@ class ProxyApp:
             return await self._handle_openai_chat(
                 request, slug, upstream_cfg, tail,
             )
+        if (upstream_cfg.protocol == "openai-chat"
+                and tail.endswith("responses")
+                and request.method == "POST"):
+            # Codex's wire_api="responses" path. Treat as a TELOS-blind
+            # passthrough (the Responses payload shape isn't ChatCompletions),
+            # but parse the terminal SSE event for usage so the dashboard sees
+            # Codex traffic instead of a silent tunnel.
+            return await self._handle_openai_responses(
+                request, slug, upstream_cfg, tail,
+            )
         if (upstream_cfg.protocol == "anthropic-messages"
                 and tail.endswith("v1/messages")
                 and request.method == "POST"):
@@ -1250,14 +1293,68 @@ class ProxyApp:
             )
         except aiohttp.ClientError as e:
             return _anthropic_error(502, "api_error", f"Upstream error: {e}")
+
+        status = upstream.status
+        ct = upstream.headers.get("content-type", "application/octet-stream")
+
+        # The OpenAI Responses API (used by Codex when ``wire_api = "responses"``)
+        # returns SSE on success: buffering the whole body would either hang for
+        # the lifetime of the stream or, worse, deliver the entire transcript as
+        # one blob at the end. Detect SSE on the content-type and forward
+        # chunk-by-chunk; otherwise buffer (cheap, and JSON tools expect a
+        # single response body).
+        if status == 200 and "text/event-stream" in ct.lower():
+            return await self._stream_passthrough(request, upstream, ct)
+
         try:
             body_bytes = await upstream.read()
-            status = upstream.status
-            ct = upstream.headers.get("content-type", "application/octet-stream")
         finally:
             upstream.release()
         return web.Response(body=body_bytes, status=status,
                             headers={"Content-Type": ct})
+
+    async def _stream_passthrough(
+        self,
+        request: web.Request,
+        upstream: aiohttp.ClientResponse,
+        content_type: str,
+    ) -> web.StreamResponse:
+        """Forward an SSE / chunked upstream response to the client without buffering.
+
+        Mirrors the chunk-forwarding loop from ``_stream_response`` (the
+        anthropic-messages path), but does not attempt any usage parsing — the
+        passthrough is a transparent tunnel for endpoints TELOS does not
+        understand (notably ``/v1/responses``).
+        """
+        downstream = web.StreamResponse(
+            status=upstream.status,
+            headers={
+                "Content-Type": content_type,
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            },
+        )
+        try:
+            await downstream.prepare(request)
+        except (ConnectionResetError, asyncio.CancelledError):
+            upstream.release()
+            return downstream
+
+        try:
+            async for chunk in upstream.content.iter_any():
+                try:
+                    await downstream.write(chunk)
+                except (ConnectionResetError, asyncio.CancelledError):
+                    break
+        except aiohttp.ClientPayloadError:
+            pass
+        finally:
+            upstream.release()
+        try:
+            await downstream.write_eof()
+        except Exception:  # noqa: BLE001
+            pass
+        return downstream
 
     async def _handle_openai_chat(
         self,
@@ -1579,6 +1676,293 @@ class ProxyApp:
                     "status": status,
                     "raw_usage": dict(usage),
                     "normalized": _normalize_openai_usage(usage),
+                    "cumulative": {
+                        "cache_creation":
+                            session_state.stats.cumulative_cache_creation,
+                        "real_requests_since_refresh":
+                            session_state.stats.real_requests_since_refresh,
+                        "refpool_slugs": sorted(session_state.refpool.slugs),
+                    },
+                }, ensure_ascii=False) + "\n")
+        except Exception:  # noqa: BLE001
+            _log.exception("usage log write failed")
+
+    # ------------------------------------------------------------------
+    # POST .../<tail ending in "responses"> — OpenAI Responses API
+    # (used by Codex with wire_api="responses"). No TELOS rewriting; we
+    # passthrough + parse usage from the terminal SSE event so codex traffic
+    # is visible on the dashboard.
+    # ------------------------------------------------------------------
+
+    async def _handle_openai_responses(
+        self,
+        request: web.Request,
+        slug: str,
+        upstream_cfg: "UpstreamConfig",
+        tail: str,
+    ) -> web.StreamResponse:
+        self._call_count += 1
+        call_index = self._call_count
+
+        try:
+            raw = await request.json()
+        except web.HTTPRequestEntityTooLarge as e:  # noqa: BLE001
+            _log.warning("request body too large (call=%d): %s", call_index, e)
+            return _anthropic_error(413, "request_too_large", str(e))
+        except Exception as e:  # noqa: BLE001
+            return _anthropic_error(400, "invalid_request_error",
+                                    f"Invalid JSON: {e}")
+
+        session_id = (
+            request.headers.get("x-telos-session")
+            or _derive_session_id(raw, request.headers)
+        )
+        session_state = self._registry.get_or_create(session_id)
+
+        if self._corpus_dir is not None:
+            try:
+                record_call(self._corpus_dir, session_id, call_index, raw)
+            except Exception:  # noqa: BLE001
+                _log.exception("corpus record failed (call=%d)", call_index)
+
+        mode = self._resolve_mode(request, session_state)
+        compare_group = self._resolve_compare_group(request, session_state)
+
+        # No TELOS pipeline: the Responses payload shape (``input`` array)
+        # is structurally different from ChatCompletions, and rewriting it
+        # would require a separate engine adapter. For now we just observe.
+        result = PipelineResult(
+            wire=dict(raw),
+            harness="passthrough",
+            plan_slots=[],
+            routing_key=None,
+            model=raw.get("model", ""),
+        )
+        # via wins (set at install time, e.g. ``codex``); otherwise fall back
+        # to header / per-client harness memory like _handle_openai_chat does.
+        if upstream_cfg.via:
+            result.harness = upstream_cfg.via
+        else:
+            _client = _client_identity(request.headers)
+            _detected = _detect_harness_signal(raw, request.headers)
+            if _detected is not None:
+                result.harness = _detected
+                self._client_harness[_client] = _detected
+            elif (remembered := self._client_harness.get(_client)):
+                result.harness = remembered
+        result.mode = mode.label
+        result.compare_group = compare_group
+
+        is_streaming = bool(raw.get("stream", False))
+        url = f"{upstream_cfg.url.rstrip('/')}/{tail}"
+        if request.query_string:
+            url = f"{url}?{request.query_string}"
+        headers = self._forward_headers(request)
+        body_bytes = json.dumps(result.wire).encode("utf-8")
+        headers["content-type"] = "application/json"
+
+        session = await self._session_get()
+        t0 = time.time()
+        try:
+            upstream = await self._post_upstream(
+                session, url, body_bytes, headers, call_index)
+        except aiohttp.ClientError as e:
+            _log.error("Upstream connection failed (call=%d): %s",
+                       call_index, e)
+            return _anthropic_error(502, "api_error", f"Upstream error: {e}")
+
+        if is_streaming:
+            return await self._stream_responses_response(
+                request, upstream, session_id, result, session_state,
+                call_index, t0,
+            )
+        return await self._buffered_responses_response(
+            upstream, session_id, result, session_state, call_index, t0,
+        )
+
+    async def _buffered_responses_response(
+        self,
+        upstream: aiohttp.ClientResponse,
+        session_id: str,
+        result: PipelineResult,
+        session_state: BridgeSessionState,
+        call_index: int,
+        t0: float,
+    ) -> web.Response:
+        try:
+            body = await upstream.read()
+            status = upstream.status
+            ct = upstream.headers.get("content-type", "application/json")
+        finally:
+            upstream.release()
+
+        usage: dict[str, Any] = {}
+        if status == 200:
+            try:
+                parsed = json.loads(body.decode("utf-8"))
+                # Non-streamed Responses puts usage on the top-level object.
+                u = parsed.get("usage")
+                if isinstance(u, dict):
+                    usage = u
+            except Exception:  # noqa: BLE001
+                pass
+        elif status >= 400:
+            _log.warning("upstream %d (call=%d): %s", status, call_index,
+                         body[:2000].decode("utf-8", "replace"))
+
+        latency_s = time.time() - t0
+        self._log_responses_usage(
+            session_id, result, usage, session_state,
+            latency_s=latency_s, streaming=False, status=status,
+            call_index=call_index,
+        )
+        return web.Response(body=body, status=status,
+                            headers={"Content-Type": ct})
+
+    async def _stream_responses_response(
+        self,
+        request: web.Request,
+        upstream: aiohttp.ClientResponse,
+        session_id: str,
+        result: PipelineResult,
+        session_state: BridgeSessionState,
+        call_index: int,
+        t0: float,
+    ) -> web.StreamResponse:
+        status = upstream.status
+        if status != 200:
+            try:
+                body = await upstream.read()
+                ct = upstream.headers.get("content-type", "application/json")
+            finally:
+                upstream.release()
+            if status >= 400:
+                _log.warning("upstream %d (call=%d): %s", status, call_index,
+                             body[:2000].decode("utf-8", "replace"))
+            self._log_responses_usage(
+                session_id, result, {}, session_state,
+                latency_s=time.time() - t0, streaming=True, status=status,
+                call_index=call_index,
+            )
+            return web.Response(body=body, status=status,
+                                headers={"Content-Type": ct})
+
+        downstream = web.StreamResponse(
+            status=200,
+            headers={
+                "Content-Type": upstream.headers.get(
+                    "content-type", "text/event-stream"),
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            },
+        )
+        try:
+            await downstream.prepare(request)
+        except (ConnectionResetError, asyncio.CancelledError) as e:
+            _log.info("downstream disconnected before stream start (call=%d): %s",
+                      call_index, e)
+            upstream.release()
+            return downstream
+
+        usage_aggregate: dict[str, Any] = {}
+        sse_buf = b""
+        try:
+            async for chunk in upstream.content.iter_any():
+                try:
+                    await downstream.write(chunk)
+                except (ConnectionResetError, asyncio.CancelledError):
+                    _log.info("downstream disconnected mid-stream (call=%d)",
+                              call_index)
+                    break
+                sse_buf += chunk
+                while b"\n\n" in sse_buf:
+                    block, sse_buf = sse_buf.split(b"\n\n", 1)
+                    self._peek_responses_sse_block(block, usage_aggregate)
+        except aiohttp.ClientPayloadError:
+            _log.warning("upstream closed connection mid-stream (call=%d)",
+                         call_index)
+
+        try:
+            await downstream.write_eof()
+        except Exception:
+            pass
+        finally:
+            upstream.release()
+
+        latency_s = time.time() - t0
+        self._log_responses_usage(
+            session_id, result, usage_aggregate, session_state,
+            latency_s=latency_s, streaming=True, status=200,
+            call_index=call_index,
+        )
+        return downstream
+
+    def _peek_responses_sse_block(
+        self, block: bytes, usage: dict[str, Any],
+    ) -> None:
+        """Responses API SSE: usage is carried on the ``response.completed``
+        event under ``data.response.usage``. Silently swallow errors.
+        """
+        event: str | None = None
+        data_raw: bytes | None = None
+        for line in block.split(b"\n"):
+            if line.startswith(b"event:"):
+                event = line[6:].strip().decode("ascii", "ignore")
+            elif line.startswith(b"data:"):
+                data_raw = line[5:].strip()
+        if event != "response.completed" or data_raw is None:
+            return
+        if data_raw == b"[DONE]" or not data_raw:
+            return
+        try:
+            data = json.loads(data_raw.decode("utf-8"))
+        except Exception:  # noqa: BLE001
+            return
+        resp = data.get("response")
+        if not isinstance(resp, dict):
+            return
+        u = resp.get("usage")
+        if isinstance(u, dict):
+            usage.update(u)
+
+    def _log_responses_usage(
+        self,
+        session_id: str,
+        result: PipelineResult,
+        usage: Mapping[str, Any],
+        session_state: BridgeSessionState,
+        *,
+        latency_s: float,
+        streaming: bool,
+        status: int,
+        call_index: int,
+    ) -> None:
+        """Append one Responses-API usage line to usage_log.
+
+        Same record shape as ``_log_openai_usage`` so the dashboard's existing
+        aggregator picks it up; only ``normalized`` uses the Responses-side
+        field names (``input_tokens`` + ``input_tokens_details.cached_tokens``).
+        """
+        if self.usage_log is None:
+            return
+        try:
+            with self.usage_log.open("a") as f:
+                f.write(json.dumps({
+                    "ts": time.time(),
+                    "session_id": session_id,
+                    "call_index": call_index,
+                    "model": result.model,
+                    "harness": result.harness,
+                    "mode": result.mode,
+                    "compare_group": result.compare_group,
+                    "tool_output_reduction": {},
+                    "n_slots": len(result.plan_slots),
+                    "slots": result.plan_slots,
+                    "latency_s": round(latency_s, 3),
+                    "streaming": streaming,
+                    "status": status,
+                    "raw_usage": dict(usage),
+                    "normalized": _normalize_responses_usage(usage),
                     "cumulative": {
                         "cache_creation":
                             session_state.stats.cumulative_cache_creation,
