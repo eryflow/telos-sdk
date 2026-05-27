@@ -6,7 +6,7 @@
 One-line install:
 
 ```bash
-pip install telos-sdk
+pip install -U telos-sdk
 # or Homebrew (see packaging/, available after the tap is published):
 # brew install telos-sdk
 ```

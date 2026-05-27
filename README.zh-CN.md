@@ -53,7 +53,7 @@
 #### ❶ &nbsp;安装
 
 ```bash
-pip install telos-sdk
+pip install -U telos-sdk
 ```
 
 #### ❷ &nbsp;连接
@@ -219,7 +219,7 @@ Core contributors: Zheng Wang, Shenzhi Wang, Yue Wu, Shiji Song, Gao Huang
 @misc{wang2026telos-agent,
   title        = {Telos: A Cost-Aware Inference Infrastructure for AI Agent},
   author       = {Zheng Wang, Shenzhi Wang, HongTao Zhong, Shiji Song, Gao Huang},
-  howpublished = {\url{https://github.com/telos-pro/telos-sdk.git}},
+  howpublished = {\url{https://github.com/learningCatHD/telos-sdk.git}},
   year         = {2026}
 }
 ```

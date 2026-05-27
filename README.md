@@ -53,7 +53,7 @@ Scale to 1,000 sessions: **$362 → $26**. In a controlled A/B/C/D run (`showcas
 #### ❶ &nbsp;Install
 
 ```bash
-pip install telos-sdk
+pip install -U telos-sdk
 ```
 
 #### ❷ &nbsp;Connect
@@ -220,7 +220,7 @@ Core contributors: Zheng Wang, Shenzhi Wang, Yue Wu, Shiji Song, Gao Huang
 @misc{wang2026telos-agent,
   title        = {Telos: A Cost-Aware Inference Infrastructure for AI Agent},
   author       = {Zheng Wang, Shenzhi Wang, HongTao Zhong, Shiji Song, Gao Huang},
-  howpublished = {\url{https://github.com/telos-pro/telos-sdk.git}},
+  howpublished = {\url{https://github.com/learningCatHD/telos-sdk.git}},
   year         = {2026}
 }
 ```
@@ -228,4 +228,4 @@ Core contributors: Zheng Wang, Shenzhi Wang, Yue Wu, Shiji Song, Gao Huang
 ---
 
 <div align="center">
-<a href="https://github.com/telos-pro/telos-sdk"><img src="https://img.shields.io/badge/⭐%20Star%20on%20GitHub-telos--pro%2Ftelos--sdk-1F4A50?style=for-the-badge&logo=github&logoColor=white" alt="Star on GitHub"/></a>
+<a href="https://github.com/learningCatHD/telos-sdk"><img src="https://img.shields.io/badge/⭐%20Star%20on%20GitHub-learningCatHD%2Ftelos--sdk-1F4A50?style=for-the-badge&logo=github&logoColor=white" alt="Star on GitHub"/></a>
