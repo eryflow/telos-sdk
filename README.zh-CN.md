@@ -17,7 +17,7 @@
 [![Status](https://img.shields.io/badge/status-Beta-d8851f?style=flat-square)](CHANGELOG.md)
 [![Protocol](https://img.shields.io/badge/protocol-TELOS%20IR-7FD8E0?style=flat-square)](docs/2026-05-06-telos-protocol.md)
 
-[**快速开始**](#quickstart) · [**支持矩阵**](#support-matrix) · [**为什么**](#why-telos) · [**协议**](#protocol) · [**路线图**](#roadmap) · [**引用**](#citation)
+[**快速开始**](#quickstart) · [**支持矩阵**](#support-matrix) · [**为什么**](#why-telos) · [**Benchmark**](#benchmark) · [**协议**](#protocol) · [**路线图**](#roadmap) · [**引用**](#citation)
 
 <sub>📖 &nbsp;**English** · [简体中文](README.zh-CN.md)</sub>
 
@@ -121,6 +121,37 @@ telos dashboard
 **① 把 token 效率推到极限。** 真实 6 轮会话 **-92.3%**；受控 48 次调用 **-36.6%（净省 -$2.16）**。每一分钱都按绝对 $/已解决请求 核算，比例可以造，美元造不了。
 
 **② 把上下文主权还给你。** `TelosIR` 是引擎无关、可序列化、可移植的上下文表示。你的 persona、你的 tools、你的 20 轮中段线程，全都封装在同一块“石碑”里。今天交给 Claude，明天迁到 DeepSeek，今晚跑在本地 vLLM 上。**上下文归你，agent 只是雇员。**
+
+---
+
+<a id="benchmark"></a>
+
+## ⬢ &nbsp;SWE-bench Verified —— TELOS 不会牺牲任务正确率
+
+token 省下来才有意义，前提是 agent 还能把题做对。我们在 **SWE-bench Verified** 上做了一次预先登记的 A/B：Hermes harness + `deepseek/deepseek-v4-flash`，每臂 100 个实例，种子化抽样覆盖 8 个仓库（sphinx、matplotlib、xarray、pytest、requests、pylint、seaborn、flask）。每臂中 55 个实例进入官方 Docker harness 评测（其余实例仅因本地镜像缓存缺口与 matplotlib 的一次 `raw.githubusercontent.com` 代理瞬断而排除）。
+
+#### 修复率（docker 评测，n=55/臂）
+
+| Arm | Resolved | 修复率 | 95% Wilson CI |
+|---|---:|---:|---|
+| **TELOS** | 23 / 55 | **41.8%** | [29.7%, 55.0%] |
+| Vanilla | 25 / 55 | 45.5% | [33.0%, 58.5%] |
+
+在双方都跑完的 34 个实例上做配对 McNemar：TELOS 独解 2，vanilla 独解 1，双侧精确 **p ≈ 1.00** —— 统计上**无法区分**。
+
+#### Token 效率（agent 端，n=100/臂）
+
+| 每任务 | TELOS | Vanilla | Δ |
+|---|---:|---:|---:|
+| **raw_input**（计费） | 92,853 | 196,934 | **-52.8%** |
+| input_total（raw + cache） | 349,349 | 511,179 | -31.7% |
+| output | 24,747 | 24,986 | -1.0% |
+| api_calls | 32.4 | 31.9 | +1.5% |
+| **cache_share** | **73.4%** | 61.5% | **+11.9 pp** |
+
+**诚实读这份数据：** 55 个实例的 95% CI 宽度约 ±12 pp，本次运行可以在 95% 置信下排除超过约 13 pp 的回归，但还无法把 Δ 钉到 ±5 pp 以内。能高置信确认的是 —— **在同一修复率区间下，计费输入 token 大约减半**。路线图上有 n ≥ 400/臂 的复跑计划，用来把修复率的置信区间收窄。
+
+<sub>原始产物：agent 运行在 [`/tmp/telos-ab-n100/{with,without}/`](/tmp/telos-ab-n100/)，docker 评测报告在 [`/tmp/telos-ab-n100/docker-eval/`](/tmp/telos-ab-n100/docker-eval/)。复现命令：`scripts/run_swebench_batch.py -n 100 --seed 7`。完整技术报告（预先登记设计、统计细节、相关工作）见 [docs/2026-05-26-swebench-ab.md](docs/2026-05-26-swebench-ab.md)。</sub>
 
 ---
 

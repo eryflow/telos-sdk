@@ -17,7 +17,7 @@
 [![Status](https://img.shields.io/badge/status-Beta-d8851f?style=flat-square)](CHANGELOG.md)
 [![Protocol](https://img.shields.io/badge/protocol-TELOS%20IR-7FD8E0?style=flat-square)](docs/2026-05-06-telos-protocol.md)
 
-[**Quickstart**](#quickstart) · [**Support Matrix**](#support-matrix) · [**Why**](#why-telos) · [**Protocol**](#protocol) · [**Roadmap**](#roadmap) · [**Citation**](#citation)
+[**Quickstart**](#quickstart) · [**Support Matrix**](#support-matrix) · [**Why**](#why-telos) · [**Benchmark**](#benchmark) · [**Protocol**](#protocol) · [**Roadmap**](#roadmap) · [**Citation**](#citation)
 
 <sub>📖 &nbsp;**English** · [Simplified Chinese](README.zh-CN.md)</sub>
 
@@ -122,6 +122,37 @@ Opens an offline HTML dashboard in your browser showing savings per call in abso
 **① Push token efficiency to the limit.** 6-turn real session **−92.3%**; controlled 48-call run **−36.6% (net −$2.16)**. Every cent accounted for in absolute $/query-resolved — ratios can be faked; dollars can't.
 
 **② Return context sovereignty to you.** `TelosIR` is an engine-agnostic, serializable, portable context representation. Your persona, your tools, your 20-turn mid-session thread — everything packed into the same **stone tablet**. Hand it to Claude today, move it to DeepSeek tomorrow, run it on a local vLLM tonight. **Your context; agents are just hired help.**
+
+---
+
+<a id="benchmark"></a>
+
+## ⬢ &nbsp;SWE-bench Verified — TELOS does not regress task correctness
+
+Token savings are only useful if the agent still solves the problem. We ran a pre-registered A/B on **SWE-bench Verified** with the Hermes harness and `deepseek/deepseek-v4-flash` — 100 instances per arm, seeded sample across 8 repos (sphinx, matplotlib, xarray, pytest, requests, pylint, seaborn, flask). 55 instances per arm were graded under the official Docker harness (the rest were excluded only due to local image-cache gaps and a transient `raw.githubusercontent.com` proxy outage on matplotlib).
+
+#### Resolved rate (docker-graded, n=55/arm)
+
+| Arm | Resolved | Rate | 95% Wilson CI |
+|---|---:|---:|---|
+| **TELOS** | 23 / 55 | **41.8%** | [29.7%, 55.0%] |
+| Vanilla | 25 / 55 | 45.5% | [33.0%, 58.5%] |
+
+Paired McNemar on the 34 instances both arms completed: 2 TELOS-only solves vs. 1 vanilla-only solve, exact two-sided **p ≈ 1.00** — statistically **indistinguishable**.
+
+#### Token efficiency (agent-side, n=100/arm)
+
+| Per-task | TELOS | Vanilla | Δ |
+|---|---:|---:|---:|
+| **raw_input** (billed) | 92,853 | 196,934 | **−52.8%** |
+| input_total (raw + cache) | 349,349 | 511,179 | −31.7% |
+| output | 24,747 | 24,986 | −1.0% |
+| api_calls | 32.4 | 31.9 | +1.5% |
+| **cache_share** | **73.4%** | 61.5% | **+11.9 pp** |
+
+**Read this honestly.** On a 55-instance subset the 95% CI is ±12 pp wide — this run can rule out an absolute regression worse than ~13 pp at 95% confidence, but not pin Δ to ±5 pp. What it does show, with high confidence, is the **input-token bill is roughly halved at the same correctness band**. A larger run (n ≥ 400/arm) is on the roadmap to tighten the resolved-rate confidence interval.
+
+<sub>Raw outputs: agent runs in [`/tmp/telos-ab-n100/{with,without}/`](/tmp/telos-ab-n100/), docker-graded reports in [`/tmp/telos-ab-n100/docker-eval/`](/tmp/telos-ab-n100/docker-eval/). Reproduce: `scripts/run_swebench_batch.py -n 100 --seed 7`. Full technical report (pre-registered design, statistical detail, related work): [docs/2026-05-26-swebench-ab.md](docs/2026-05-26-swebench-ab.md).</sub>
 
 ---
 
