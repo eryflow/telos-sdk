@@ -1,4 +1,4 @@
-"""``telos.init`` env-based installers tests (codex / openclaw / hermes).
+"""``telos.init`` env-based installers tests (openclaw / hermes).
 
 These installers don't persist anything to disk — routing is done by the
 ``telos <harness>`` launcher injecting env into the subprocess. The tests
@@ -17,7 +17,7 @@ from telos.init.anthropic_env import EnvInstaller
 
 
 def test_env_installers_registered() -> None:
-    for name in ("codex", "openclaw", "hermes"):
+    for name in ("openclaw", "hermes"):
         assert name in INSTALLERS
     print("✓ test_env_installers_registered")
 
@@ -116,17 +116,7 @@ def test_status_reports_live_env_mismatch() -> None:
 
 
 def test_factory_from_registry() -> None:
-    """``INSTALLERS["codex"]`` is the env-based installer; openclaw and hermes
-    moved to config-patching installers in Phase 2 (see test_init_openclaw /
-    test_init_hermes)."""
-    inst = INSTALLERS["codex"](proxy_url="http://h:1")
-    assert isinstance(inst, EnvInstaller)
-    assert inst.name == "codex"
-    assert inst.env_var == "OPENAI_BASE_URL"
-    assert inst.proxy_url == "http://h:1"
-
-    # openclaw / hermes now use their own installers; the env-installer is no
-    # longer in the registry for them.
+    """openclaw / hermes use config-patching installers in the registry."""
     from telos.init.hermes import HermesInstaller
     from telos.init.openclaw import OpenClawInstaller
     assert isinstance(INSTALLERS["openclaw"](proxy_url="http://h:1"),

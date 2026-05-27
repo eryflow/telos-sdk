@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import shutil
 from dataclasses import dataclass
+from pathlib import Path
 
 # injection values:
 #   "claude-settings" —— patch the env in ~/.claude/settings.json (claude-code exclusive)
@@ -94,7 +95,23 @@ def resolve_executable(spec: HarnessSpec, executables: dict[str, str] | None = N
 
 def executable_path(spec: HarnessSpec, executables: dict[str, str] | None = None) -> str | None:
     """The absolute path of the harness executable on PATH; returns ``None`` if not installed."""
-    return shutil.which(resolve_executable(spec, executables))
+    resolved = shutil.which(resolve_executable(spec, executables))
+    if resolved is not None:
+        return resolved
+    for candidate in _fallback_executable_candidates(spec):
+        if candidate.exists() and candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def _fallback_executable_candidates(spec: HarnessSpec) -> tuple[Path, ...]:
+    """Known app-bundled CLI locations that may not be exported onto PATH."""
+    if spec.name == "codex":
+        return (
+            Path("/Applications/Codex.app/Contents/Resources/codex"),
+            Path.home() / "Applications/Codex.app/Contents/Resources/codex",
+        )
+    return ()
 
 
 def detect_installed(executables: dict[str, str] | None = None) -> list[HarnessSpec]:

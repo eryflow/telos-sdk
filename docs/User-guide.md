@@ -204,9 +204,16 @@ telos init --harness claude-code --status      # view only, don't modify files
 
 ### Integrating other clients
 
-codex / openclaw / hermes are injected via environment variables (set automatically when `telos <harness>` starts the child process).
-Any client that respects `ANTHROPIC_BASE_URL` can also use `telos init --harness generic` to get a set of
-manual export instructions.
+`telos init --harness codex` adds a `model_provider = "telos"` custom provider
+to `~/.codex/config.toml`, pointing Codex at
+`http://127.0.0.1:7171/upstreams/openai/v1`. Codex currently uses the OpenAI
+Responses API by default; the gateway routes that path as passthrough.
+OpenAI ChatCompletions-compatible traffic through the same gateway path is
+TELOS-processed.
+
+openclaw / hermes patch their own provider configs. Any client that respects
+`ANTHROPIC_BASE_URL` or `OPENAI_BASE_URL` can also use
+`telos init --harness generic` to get a set of manual export instructions.
 
 ### Full CLI reference
 
@@ -298,4 +305,3 @@ usage_log adds a `cumulative` block per line:
 ### Disabling accumulation (a fresh Bridge per turn)
 
 Not passing `session_state`, or restarting the proxy, makes the behavior fall back to newing a fresh state per turn. This was the default behavior before 1.0, and it does not break wire bytes.
-

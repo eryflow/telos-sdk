@@ -729,6 +729,6 @@ Taking path B (proxy) + `mode=both` as an example:
 | Add a new harness | In [harness/](../harness/) add a plugin, register it in [registry.py](../registry.py) |
 | Add a new engine adapter | In [engine/](../engine/) add an `EngineAdapter` / `BidirectionalEngineAdapter` subclass, register it in the registry |
 | Add a new tool filtering rule | The `FallbackFilter` of [output_filter/filters.py](../output_filter/filters.py), or let `RtkFilter` go through the rtk binary |
-| Add a `/v1/chat/completions` proxy path | In [proxy/server.py](../proxy/server.py) add a route, reusing the same OpenAI pipeline |
+| Add a `/v1/chat/completions` proxy path | In [proxy/server.py](../proxy/server.py) add a route, reusing the same OpenAI pipeline. Codex's `/v1/responses` path is currently routed through the same upstream mechanism as passthrough. |
 | Persist session state | `BridgeSessionState` is an ordinary dataclass, serializable to JSON; change `_SessionRegistry` to use external storage |
 | Adjust the canonical sorting | The bridge's `_SCHEMA_SET_ARRAY_KEYS`, `_TOOL_SOURCE_RANK` are module-level names, monkey-patchable |

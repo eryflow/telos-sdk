@@ -110,6 +110,14 @@ _DEFAULT_UPSTREAMS: dict[str, UpstreamConfig] = {
         engine="deepseek",
         protocol="openai-chat",
     ),
+    "openai": UpstreamConfig(
+        # Used by Codex's custom provider profile. Today the gateway optimizes
+        # OpenAI ChatCompletions traffic and transparently passes Responses API
+        # traffic through this same upstream route.
+        url="https://api.openai.com",
+        engine="openai",
+        protocol="openai-chat",
+    ),
 }
 
 

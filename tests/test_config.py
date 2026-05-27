@@ -24,6 +24,8 @@ def test_load_missing_returns_defaults() -> None:
     assert c.mode == "telos"
     assert c.gateway.port == 7171
     assert c.favorite_harness is None
+    assert c.upstreams["openai"].url == "https://api.openai.com"
+    assert c.upstreams["openai"].engine == "openai"
     print("✓ test_load_missing_returns_defaults")
 
 

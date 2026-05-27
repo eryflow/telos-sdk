@@ -10,9 +10,7 @@ One installer per harness:
   can forward verbatim).
 - ``hermes``: patches the top-level ``model.base_url`` in
   ``~/.hermes/config.yaml`` (analogous pattern).
-- ``codex``: launcher-only — codex does not honor a base-URL env var; the
-  ``telos codex`` launcher injects ``OPENAI_BASE_URL`` into the subprocess
-  at startup.
+- ``codex``: patches ``~/.codex/config.toml`` with a TELOS custom provider.
 - ``generic``: prints a set of shell ``export`` commands the user can add
   to their rc file.
 """
@@ -21,9 +19,9 @@ from __future__ import annotations
 
 from typing import Callable
 
-from telos.init.anthropic_env import make_env_installer
 from telos.init.base import AgentInstaller, InstallResult
 from telos.init.claude_code import ClaudeCodeInstaller
+from telos.init.codex import CodexInstaller
 from telos.init.generic import GenericInstaller
 from telos.init.hermes import HermesInstaller
 from telos.init.openclaw import OpenClawInstaller
@@ -33,7 +31,7 @@ InstallerFactory = Callable[..., AgentInstaller]
 
 INSTALLERS: dict[str, InstallerFactory] = {
     "claude-code": ClaudeCodeInstaller,
-    "codex": make_env_installer("codex", "OPENAI_BASE_URL"),
+    "codex": CodexInstaller,
     "openclaw": OpenClawInstaller,
     "hermes": HermesInstaller,
     "generic": GenericInstaller,

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import telos.harnesses as h
 
 
@@ -42,14 +44,42 @@ def test_detect_installed(monkeypatch=None) -> None:
     import telos.harnesses as mod
 
     real_which = mod.shutil.which
+    real_fallback = mod._fallback_executable_candidates
     mod.shutil.which = lambda name: "/usr/bin/" + name if name == "claude" else None
+    mod._fallback_executable_candidates = lambda spec: ()
     try:
         found = mod.detect_installed()
         names = {s.name for s in found}
         assert names == {"claude-code"}, names
     finally:
         mod.shutil.which = real_which
+        mod._fallback_executable_candidates = real_fallback
     print("✓ test_detect_installed")
+
+
+def test_detect_codex_app_fallback(monkeypatch=None) -> None:
+    import telos.harnesses as mod
+
+    real_which = mod.shutil.which
+    real_fallback = mod._fallback_executable_candidates
+    mod.shutil.which = lambda name: None
+    mod._fallback_executable_candidates = (
+        lambda spec: (Path("/tmp/codex-present"),) if spec.name == "codex" else ()
+    )
+    real_exists = Path.exists
+    real_is_file = Path.is_file
+    Path.exists = lambda self: str(self) == "/tmp/codex-present"
+    Path.is_file = lambda self: str(self) == "/tmp/codex-present"
+    try:
+        found = mod.detect_installed()
+        names = {s.name for s in found}
+        assert names == {"codex"}, names
+    finally:
+        mod.shutil.which = real_which
+        mod._fallback_executable_candidates = real_fallback
+        Path.exists = real_exists
+        Path.is_file = real_is_file
+    print("✓ test_detect_codex_app_fallback")
 
 
 def main() -> None:
@@ -58,6 +88,7 @@ def main() -> None:
     test_resolve_executable_override()
     test_gateway_env()
     test_detect_installed()
+    test_detect_codex_app_fallback()
     print("\nall harnesses tests passed.")
 
 
