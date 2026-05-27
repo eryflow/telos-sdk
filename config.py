@@ -290,3 +290,39 @@ def update_config(**fields: Any) -> TelosConfig:
         cfg.gateway.usage_log = str(fields["gateway_usage_log"] or "")
     save_config(cfg)
     return cfg
+
+
+def revert_upstreams_owned_by(via: str) -> tuple[Path | None, list[str]]:
+    """Undo upstream-table entries owned by a given installer.
+
+    Each installer (hermes / openclaw / codex) tags the slugs it patches with
+    ``via=<name>`` at install time. On uninstall we walk the table:
+
+    - slug present in :data:`_DEFAULT_UPSTREAMS` → reset it to the built-in
+      default (e.g. ``openrouter`` / ``deepseek`` / ``openai`` were defaults
+      that the installer only added ``via`` to);
+    - slug not a default → remove it entirely (e.g. ``codex-chatgpt`` is
+      installer-created and has no canonical default to fall back to).
+
+    Returns ``(saved_path, change_descriptions)``. If nothing matched, returns
+    ``(None, [])`` and ``~/.telos/config.json`` is not rewritten.
+    """
+    if not via:
+        return None, []
+    cfg = load_config()
+    changes: list[str] = []
+    for slug, entry in list(cfg.upstreams.items()):
+        if entry.via != via:
+            continue
+        default = _DEFAULT_UPSTREAMS.get(slug)
+        if default is not None:
+            if entry == default:
+                continue
+            cfg.upstreams[slug] = default
+            changes.append(f"reset upstream {slug!r} to default (cleared via={via!r})")
+        else:
+            del cfg.upstreams[slug]
+            changes.append(f"removed installer-added upstream {slug!r}")
+    if not changes:
+        return None, []
+    return save_config(cfg), changes

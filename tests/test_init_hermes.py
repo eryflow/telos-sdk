@@ -179,7 +179,10 @@ def test_uninstall_skips_when_user_manually_changed(tmp_path: Path) -> None:
         config_path.write_text(yaml.safe_dump(data, sort_keys=False))
 
         r = inst.uninstall()
-        assert not r.changed_files
+        # Hermes's own config.yaml is left alone (the user clearly wanted
+        # the manual value); state file is preserved so a later legitimate
+        # uninstall can still attempt the restore.
+        assert config_path not in r.changed_files
         data2 = yaml.safe_load(config_path.read_text())
         assert data2["model"]["base_url"] == "https://something-else"
         assert state_path.exists()

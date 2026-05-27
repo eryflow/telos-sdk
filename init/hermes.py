@@ -31,6 +31,7 @@ from telos.config import (
     TelosConfig,
     UpstreamConfig,
     load_config,
+    revert_upstreams_owned_by,
     save_config,
     telos_home,
 )
@@ -518,12 +519,21 @@ class HermesInstaller(AgentInstaller):
     def uninstall(self) -> InstallResult:
         r = InstallResult(agent=self.name, action="uninstall")
 
+        # Undo any ~/.telos/config.json upstream entries owned by hermes
+        # regardless of hermes.json state. This makes uninstall idempotent
+        # and tolerant of partial prior runs.
+        telos_saved, telos_changes = revert_upstreams_owned_by(self.name)
+        if telos_saved is not None:
+            r.changed_files.append(telos_saved)
+            r.notes.extend(telos_changes)
+
         records = _read_state_file(self._state_path)
         if not records:
-            r.notes.append(
-                f"no telos installer state for hermes "
-                f"({self._state_path}); nothing to undo."
-            )
+            if telos_saved is None:
+                r.notes.append(
+                    f"no telos installer state for hermes "
+                    f"({self._state_path}); nothing to undo."
+                )
             return r
 
         data = self._read_config()

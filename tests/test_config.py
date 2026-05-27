@@ -80,12 +80,66 @@ def test_bad_json_raises() -> None:
     raise AssertionError("expected RuntimeError")
 
 
+def test_revert_upstreams_owned_by() -> None:
+    """The installer-uninstall path uses this helper to undo per-installer
+    edits in ~/.telos/config.json. Three cases must hold:
+
+    1. A *default* slug that an installer tagged with ``via`` is reset to its
+       canonical default (URL/engine kept, ``via`` cleared).
+    2. A *non-default* slug the installer added is removed entirely.
+    3. Slugs not owned by this installer are left untouched.
+    """
+    _with_home(_tmp_home())
+    c = cfgmod.load_config()
+    # (1) Default slug an installer has tagged.
+    c.upstreams["openrouter"] = cfgmod.UpstreamConfig(
+        url="https://openrouter.ai/api", engine="deepseek",
+        protocol="openai-chat", via="hermes",
+    )
+    # (2) Installer-added slug not in defaults.
+    c.upstreams["codex-chatgpt"] = cfgmod.UpstreamConfig(
+        url="https://chatgpt.com/backend-api/codex", engine="openai",
+        protocol="openai-chat", via="codex",
+    )
+    # (3) Slug owned by someone else.
+    c.upstreams["deepseek"] = cfgmod.UpstreamConfig(
+        url="https://api.deepseek.com", engine="deepseek",
+        protocol="openai-chat", via="openclaw",
+    )
+    cfgmod.save_config(c)
+
+    saved, changes = cfgmod.revert_upstreams_owned_by("hermes")
+    assert saved is not None
+    assert any("openrouter" in s for s in changes), changes
+
+    c2 = cfgmod.load_config()
+    # Default slug bounced back to the canonical default (no via).
+    assert c2.upstreams["openrouter"].via == ""
+    assert c2.upstreams["openrouter"].url == "https://openrouter.ai/api"
+    # Other-owner slug untouched.
+    assert c2.upstreams["deepseek"].via == "openclaw"
+    # Codex slug still there (different owner).
+    assert "codex-chatgpt" in c2.upstreams
+
+    # Now uninstall codex; the codex-chatgpt slug disappears entirely.
+    saved, changes = cfgmod.revert_upstreams_owned_by("codex")
+    assert saved is not None
+    c3 = cfgmod.load_config()
+    assert "codex-chatgpt" not in c3.upstreams
+
+    # Calling again is a no-op (idempotent).
+    saved, changes = cfgmod.revert_upstreams_owned_by("codex")
+    assert saved is None and changes == []
+    print("✓ test_revert_upstreams_owned_by")
+
+
 def main() -> None:
     test_load_missing_returns_defaults()
     test_save_load_round_trip()
     test_update_config()
     test_unknown_keys_preserved()
     test_bad_json_raises()
+    test_revert_upstreams_owned_by()
     print("\nall config tests passed.")
 
 

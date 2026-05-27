@@ -162,6 +162,54 @@ def test_install_chatgpt_mode_routes_to_backend_codex(tmp_path: Path) -> None:
     print("✓ test_install_chatgpt_mode_routes_to_backend_codex")
 
 
+def test_uninstall_chatgpt_mode_removes_telos_upstream(tmp_path: Path) -> None:
+    """Regression: ChatGPT-mode install adds a ``codex-chatgpt`` slug to
+    ``~/.telos/config.json``. Uninstall must remove it; before the fix the
+    slug stayed forever and ``telos init codex --uninstall`` left a dangling
+    ``via=codex`` upstream that the gateway kept forwarding to chatgpt.com.
+    """
+    telos_home = tmp_path / "telos"
+    config = tmp_path / "config.toml"
+    auth = tmp_path / "auth.json"
+    auth.write_text(json.dumps({
+        "auth_mode": "chatgpt",
+        "OPENAI_API_KEY": None,
+        "tokens": {"access_token": "jwt..."},
+    }), encoding="utf-8")
+
+    prev_telos_home = os.environ.get("TELOS_HOME")
+    os.environ["TELOS_HOME"] = str(telos_home)
+    try:
+        inst = CodexInstaller(
+            proxy_url="http://127.0.0.1:7171",
+            config_path=config,
+            auth_json_path=auth,
+        )
+        inst.install()
+
+        from telos.config import load_config
+        cfg_before = load_config()
+        assert "codex-chatgpt" in cfg_before.upstreams
+
+        r = inst.uninstall()
+        # config.toml is restored.
+        text = config.read_text(encoding="utf-8")
+        assert "[model_providers.telos]" not in text
+        assert "telos managed codex" not in text
+
+        # ~/.telos/config.json has the codex-chatgpt slug stripped, AND the
+        # uninstall notes mention it (so the user can see what was changed).
+        cfg_after = load_config()
+        assert "codex-chatgpt" not in cfg_after.upstreams, cfg_after.upstreams
+        assert any("codex-chatgpt" in n for n in r.notes), r.notes
+    finally:
+        if prev_telos_home is None:
+            os.environ.pop("TELOS_HOME", None)
+        else:
+            os.environ["TELOS_HOME"] = prev_telos_home
+    print("✓ test_uninstall_chatgpt_mode_removes_telos_upstream")
+
+
 def main() -> None:
     test_codex_installer_registered()
     test_detect_auth_mode_with_tmp()
@@ -176,6 +224,8 @@ def main() -> None:
         test_status_reports_connected(Path(d))
     with tempfile.TemporaryDirectory() as d:
         test_install_chatgpt_mode_routes_to_backend_codex(Path(d))
+    with tempfile.TemporaryDirectory() as d:
+        test_uninstall_chatgpt_mode_removes_telos_upstream(Path(d))
     print("\nall codex installer tests passed.")
 
 

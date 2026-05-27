@@ -30,7 +30,12 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from telos.config import UpstreamConfig, load_config, save_config
+from telos.config import (
+    UpstreamConfig,
+    load_config,
+    revert_upstreams_owned_by,
+    save_config,
+)
 from telos.init.base import AgentInstaller, InstallResult
 
 _ROOT_BEGIN = "# >>> telos managed codex root\n"
@@ -292,6 +297,14 @@ class CodexInstaller(AgentInstaller):
 
     def uninstall(self) -> InstallResult:
         result = InstallResult(agent=self.name, action="uninstall")
+        # Always try to undo telos-side upstream registrations first, so a
+        # half-finished previous install (config.toml missing but
+        # ~/.telos/config.json polluted) still gets cleaned up.
+        saved, changes = revert_upstreams_owned_by(self.name)
+        if saved is not None:
+            result.changed_files.append(saved)
+            result.notes.extend(changes)
+
         if not self.config_path.exists():
             result.notes.append(f"{self.config_path} does not exist; no action")
             return result
