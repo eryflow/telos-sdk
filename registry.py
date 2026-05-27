@@ -35,6 +35,7 @@ _HARNESS_DISPLAY_NAMES: dict[str, str] = {
     "openclaw": "OpenClaw",
     "hermes": "Claude Code",
     "telos": "Telos",
+    "codex": "Codex",
 }
 
 

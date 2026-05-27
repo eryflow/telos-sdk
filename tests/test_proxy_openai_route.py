@@ -456,6 +456,88 @@ async def _test_openai_responses_passthrough_streams() -> None:
         await up_runner.cleanup()
 
 
+async def _test_openai_responses_logs_usage(tmp_log: Path) -> None:
+    """The Responses-API endpoint must produce a usage_log entry so the
+    dashboard sees Codex traffic. The terminal SSE event
+    ``response.completed`` carries ``response.usage`` — the gateway parses
+    that out and writes a normalized record tagged with the slug's ``via``
+    (``"codex"``), which is what the dashboard groups by.
+    """
+    async def responses_handler(request: web.Request) -> web.StreamResponse:
+        response = web.StreamResponse(
+            status=200,
+            headers={"Content-Type": "text/event-stream"},
+        )
+        await response.prepare(request)
+        chunks = [
+            b'event: response.created\ndata: {"id":"resp_x"}\n\n',
+            b'event: response.output_text.delta\ndata: {"delta":"Hi"}\n\n',
+            b'event: response.completed\n'
+            b'data: {"type":"response.completed","response":{"id":"resp_x",'
+            b'"status":"completed","usage":{"input_tokens":1000,'
+            b'"input_tokens_details":{"cached_tokens":800},'
+            b'"output_tokens":42,"total_tokens":1042}}}\n\n',
+        ]
+        for c in chunks:
+            await response.write(c)
+        await response.write_eof()
+        return response
+
+    up_app = web.Application()
+    up_app.router.add_post("/responses", responses_handler)
+    up_runner = web.AppRunner(up_app)
+    await up_runner.setup()
+    up_site = web.TCPSite(up_runner, "127.0.0.1", 0)
+    await up_site.start()
+    up_port = up_site._server.sockets[0].getsockname()[1]
+    up_url = f"http://127.0.0.1:{up_port}"
+
+    upstreams = {
+        # Mirrors the installer's chatgpt-mode slug: no /v1 in the URL,
+        # via="codex" labels traffic for the dashboard breakdown.
+        "codex-chatgpt": UpstreamConfig(
+            url=up_url, engine="openai", protocol="openai-chat", via="codex",
+        ),
+    }
+    app = make_app(upstream="http://unused", upstreams=upstreams,
+                    usage_log=tmp_log)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    px_port = site._server.sockets[0].getsockname()[1]
+    px_url = f"http://127.0.0.1:{px_port}"
+
+    try:
+        async with aiohttp.ClientSession() as client:
+            async with client.post(
+                f"{px_url}/upstreams/codex-chatgpt/responses",
+                json={"model": "gpt-5.5", "input": "hi", "stream": True},
+                headers={"authorization": "Bearer sk-test",
+                         "x-telos-session": "codex-log"},
+            ) as resp:
+                assert resp.status == 200
+                async for _ in resp.content.iter_any():
+                    pass
+
+        line = tmp_log.read_text().strip().splitlines()[-1]
+        record = json.loads(line)
+        assert record["session_id"] == "codex-log"
+        # The crucial assertion: the dashboard's "by harness" sees codex.
+        assert record["harness"] == "codex"
+        # Responses-API usage normalization: cached → cache_read,
+        # input - cached → raw_input, output_tokens → output.
+        assert record["normalized"]["cache_read"] == 800
+        assert record["normalized"]["raw_input"] == 200
+        assert record["normalized"]["output"] == 42
+        # Raw usage round-trips for debugging / future reprocessing.
+        assert record["raw_usage"]["input_tokens"] == 1000
+        print("✓ test_openai_responses_logs_usage")
+    finally:
+        await runner.cleanup()
+        await up_runner.cleanup()
+
+
 async def _test_openai_slug_in_defaults() -> None:
     """Regression: ``codex`` writes ``/upstreams/openai/v1`` as its base_url; the
     gateway therefore must ship with an ``openai`` slug in the default upstream
@@ -539,6 +621,7 @@ async def _run_all(tmp_log: Path) -> None:
     await _test_per_slug_upstream_url_is_honored()
     await _test_openai_slug_in_defaults()
     await _test_openai_responses_passthrough_streams()
+    await _test_openai_responses_logs_usage(tmp_log)
     await _test_anthropic_route_still_works()
 
 
