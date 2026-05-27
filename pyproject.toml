@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "telos-sdk"
-version = "0.1.3"
+version = "0.1.4"
 description = "TELOS SDK: a cache-aware prompt protocol and gateway for portable agent context."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -43,10 +43,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/telos-pro/telos-sdk"
-Repository = "https://github.com/telos-pro/telos-sdk"
-Issues = "https://github.com/telos-pro/telos-sdk/issues"
-Changelog = "https://github.com/telos-pro/telos-sdk/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/learningCatHD/telos-sdk"
+Repository = "https://github.com/learningCatHD/telos-sdk"
+Issues = "https://github.com/learningCatHD/telos-sdk/issues"
+Changelog = "https://github.com/learningCatHD/telos-sdk/blob/main/CHANGELOG.md"
 
 [project.scripts]
 telos = "telos.cli:main"

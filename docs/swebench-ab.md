@@ -274,7 +274,7 @@ OpenRouter 上 `deepseek-v4-flash` 的 upstream 报价在 raw input、cache_read
 读者无需信任本文给出的任何百分比——TELOS 是开源的，本文使用的全部 artifacts、抽样种子与评测脚本均在仓库内。三行命令即可在自己的工作流上跑出同款审计：
 
 ```bash
-pip install telos-sdk
+pip install -U telos-sdk
 telos init       # 自动接入 claude-code / codex / openclaw / hermes
 telos dashboard  # 浏览器打开离线美元看板
 ```
@@ -343,7 +343,7 @@ python -m swebench.harness.run_evaluation \
   --cache_level instance --timeout 1500
 ```
 
-随机种子、抽样脚本与 raw run artifacts 均已开源，详见 [github.com/telos-pro/telos-sdk](https://github.com/telos-pro/telos-sdk)。
+随机种子、抽样脚本与 raw run artifacts 均已开源，详见 [github.com/learningCatHD/telos-sdk](https://github.com/learningCatHD/telos-sdk)。
 
 ---
 
@@ -357,6 +357,6 @@ python -m swebench.harness.run_evaluation \
             Song, Shiji and Huang, Gao},
   year   = {2026},
   howpublished = {LEAP Lab Technical Report, Tsinghua University},
-  url    = {https://github.com/telos-pro/telos-sdk}
+  url    = {https://github.com/learningCatHD/telos-sdk}
 }
 ```
