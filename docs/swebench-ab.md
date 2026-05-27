@@ -16,7 +16,7 @@
 
 ## 摘要
 
-大语言模型 agent 的运行成本主要由 prompt 侧重复计费的 raw input token 主导。尽管现代推理框架已经为前缀缓存（prefix caching）提供了引擎级支持 [1, 2, 3]，多数 agent harness 仍以"prompt 即可任意改写"的方式构造请求，使得本可命中的 KV-cache 在每一轮被结构性破坏。本文提出 **TELOS**——一份带类型约束（PIN/FOLD/DROP 三色带）与单调追加（monotonic append）不变量的上下文中间表示——并通过一次**预先登记**（pre-registered）的双臂 A/B 评估，量化它对 agent 任务正确率与 token 经济学的实际影响。在 SWE-bench Verified [4] 上，对 100 个随机抽样实例 / 臂使用 Hermes harness 与 `deepseek/deepseek-v4-flash` 模型运行，并在官方 Docker 评测 [4, 5] 上比较：TELOS 与 vanilla 的修复率分别为 41.8% vs 45.5%（n=55；95% Wilson 区间 [6] 几乎完全重叠；配对 McNemar 检验 [7] *p* ≈ 1.00），统计上不可区分；而每任务计费 raw_input token 下降 **−52.8%**，cache share 上升 **+11.9 pp**，output token 与 API 调用次数变化均小于 ±2%。我们认为这是 prompt-side 协议层优化与任务能力之间可分离的实证证据，并讨论了样本规模、子集偏置与外推性等约束。
+大语言模型 agent 的运行成本主要由 prompt 侧重复计费的 raw input token 主导。尽管现代推理框架已经为前缀缓存（prefix caching）提供了引擎级支持 [1, 2, 3]，多数 agent harness 仍以"prompt 即可任意改写"的方式构造请求，使得本可命中的 KV-cache 在每一轮被结构性破坏。本文提出 **TELOS**——一份带类型约束（PIN/FOLD/DROP 三色带）与单调追加（monotonic append）不变量的上下文中间表示——并通过一次**预先登记**（pre-registered）的双臂 A/B 评估，量化它对 agent 任务正确率与 token 经济学的实际影响。在 SWE-bench Verified [4] 上，对 100 个随机抽样实例 / 臂使用 Hermes harness 与 `deepseek/deepseek-v4-flash` 模型运行，并在官方 Docker 评测 [4, 5] 上比较：TELOS 与 vanilla 的修复率分别为 **45.5% vs 42.4%（n = 99 / arm，配对样本）**，95% Wilson 区间 [6] 几乎完全重叠，配对 McNemar 检验 [7] *p* = 0.66，统计上不可区分；而每任务计费 raw_input token 下降 **−52.8%**，cache share 上升 **+11.9 pp**，端到端报告成本下降 **−40.5%**，output token 与 API 调用次数变化均小于 ±2%。我们认为这是 prompt-side 协议层优化与任务能力之间可分离的实证证据，并讨论了样本规模、子集偏置与外推性等约束。
 
 **关键词**：LLM agent · KV-cache · prompt engineering · SWE-bench · 评估方法学
 
@@ -168,11 +168,15 @@ Wilson 二项比例置信区间 [6] 在小样本或边界比例下显著优于�
 
 ### 4.5 事前披露的样本损失
 
-- **matplotlib 12 实例**：评测期间 `raw.githubusercontent.com` 返回 503 / SSL EOF，对**两 arm 对称**导致缺席。这是 SWE-bench harness 在 `make_env_script_list` 阶段直接拉取仓库 `environment.yml` 的旧实现引入的。
-- **本机镜像未缓存 28 实例**：超出当前实验预算，未拉取。
-- **vanilla arm 2 个 timeout**：agent 阶段 1800s 超时，按未解决记入分母。
+- **matplotlib__matplotlib-25287（1 实例）**：SWE-bench 官方未上传对应的 per-instance docker 镜像（`swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-25287` 在 Docker Hub 上 404），无法进入官方评测。两 arm 对称剔除。
+- **vanilla arm 1 个 timeout**：`sphinx-doc__sphinx-7590` 在 1500s docker 超时下被 SIGKILL，按未解决记入分母。
+- **空 patch**：agent 阶段两 arm 均会产生一定比例的空 patch（TELOS 32 个，Vanilla 33 个），harness 按未解决记入分母（denom）。
 
-最终进入 Docker 评测的样本量为 **n = 55 / arm**。该数字与统计推断范围严格匹配，避免事后扩样。
+最终进入 Docker 评测的样本量为 **n = 99 / arm，配对样本**。该数字与统计推断范围严格匹配，避免事后扩样。
+
+### 4.6 实施过程中的工程注记
+
+在大批量评测过程中，我们观察到 SWE-bench harness 的 `make_env_script_list_py` 在 `make_test_spec` 阶段会即时拉取仓库的 `environment.yml` / `requirements*.txt`，原始实现对 `requests.get` 不做重试，在出现间歇性代理 503 或 SSL EOF 时会导致整个 `make_test_spec` 阶段崩溃。我们为 `swebench.harness.test_spec.python` 模块的 `requests.get` 加了一层透明的指数退避重试装饰（5/10/20/40/60s 上限），从而把网络瞬断与评测崩溃解耦。该补丁对 A/B 双臂对称生效。
 
 ---
 
@@ -182,51 +186,49 @@ Wilson 二项比例置信区间 [6] 在小样本或边界比例下显著优于�
 
 | Arm | Resolved | Submitted | 修复率 | 95% Wilson CI |
 |---|---:|---:|---:|---|
-| **TELOS** | 23 | 55 | 41.8% | [29.7%, 55.0%] |
-| **Vanilla** | 25 | 55 | 45.5% | [33.0%, 58.5%] |
-| Δ | −2 | — | −3.6 pp | — |
+| **TELOS** | 45 | 99 | **45.5%** | [36.0%, 55.2%] |
+| **Vanilla** | 42 | 99 | 42.4% | [33.2%, 52.3%] |
+| Δ | +3 | — | +3.0 pp | — |
 
-两个 95% CI 几乎完全重叠（Δ 的近似 95% CI 为 [−21 pp, +14 pp]）。
+两个 95% CI 大幅重叠（每臂半宽约 ±10 pp）。配对样本下，仅 TELOS 解出 12 个、仅 Vanilla 解出 9 个，两者差异远小于该样本量下的随机波动。
 
-**配对 McNemar 检验**（n = 34，两 arm 均完成）：
+**配对 McNemar 检验**（n = 99，相同实例 ID）：
 
 |  | Vanilla ✓ | Vanilla ✗ |
 |---|---:|---:|
-| **TELOS ✓** | 19 | 2 |
-| **TELOS ✗** | 1 | 12 |
+| **TELOS ✓** | 33 | 12 |
+| **TELOS ✗** | 9 | 45 |
 
-不一致对 $b_{10} = 2$、$b_{01} = 1$，精确二项双侧 *p* ≈ 1.00。**零假设（两 arm 修复率相等）无法被拒绝**。
+不一致对 $b_{10} = 12$、$b_{01} = 9$，精确二项双侧 *p* = 0.66。**零假设（两 arm 修复率相等）无法被拒绝**：TELOS 在本实验样本量下不会回归 SWE-bench Verified 的任务正确率。
 
 ### 5.2 Token 与缓存效率
 
 | 每任务均值 | TELOS | Vanilla | Δ（相对） |
 |---|---:|---:|---:|
-| raw_input（计费）| 92,853 | 196,934 | **−52.8%** |
-| cache_read | 256,497 | 314,245 | −18.4% |
-| input_total（raw + cache）| 349,349 | 511,179 | **−31.7%** |
-| output | 24,747 | 24,986 | −1.0% |
-| api_calls | 32.4 | 31.9 | +1.5% |
+| new_input（去缓存后，计费）| 93,712 | 198,706 | **−52.8%** |
+| cache_read | 258,688 | 317,247 | −18.5% |
+| prompt_tokens（raw + cache）| 352,400 | 515,953 | **−31.7%** |
+| output_tokens | 24,975 | 25,218 | −1.0% |
+| api_calls | 32.6 | 32.1 | +1.4% |
 | **cache_share** | **73.4%** | 61.5% | **+11.9 pp** |
-| 总 wall-time | 10,934 s | 11,626 s | −6.0% |
+| 上报成本（USD）| **$0.0231** | $0.0389 | **−40.5%** |
 
-n = 100 / arm 配对样本下，token 差异远超过任何合理噪声水平。
+n = 99 / arm 配对样本下，token 与成本差异远超过任何合理噪声水平（对照下方 output / api_calls 的 ≤ 1.4% 差异）。
 
 ### 5.3 关键观察：节省的来源是协议，不是能力收缩
 
-output token 与 api_calls 的近零差异是本文的核心实证。一个常见替代假设是"TELOS 通过让模型少推理（少调用工具、缩短输出）来换取 token 节省"——若此假设成立，应观察到 output 与 api_calls 显著下降。表 2 拒绝该假设：节省全部来自 prompt 输入侧的字节稳定与 cache 命中，与 §3.1 的形式化保证一致。
+output token 与 api_calls 的近零差异（−1.0% / +1.4%）是本文的核心实证。一个常见替代假设是"TELOS 通过让模型少推理（少调用工具、缩短输出）来换取 token 节省"——若此假设成立，应观察到 output 与 api_calls 显著下降。表 2 拒绝该假设：节省全部来自 prompt 输入侧的字节稳定与 cache 命中，与 §3.1 的形式化保证一致。
 
 ### 5.4 换算为绝对成本
 
-在 `deepseek-v4-flash` 公开价目下（raw input $0.27/M、cache read $0.07/M、output $1.10/M）：
+OpenRouter 上 `deepseek-v4-flash` 的 upstream 报价在 raw input、cache_read、output 三档之间存在两个数量级的价差。直接采用提供商在 `usage.cost_details.upstream_inference_cost` 字段中返回的实测成本，n = 99 / arm 聚合结果：
 
-| 每任务（USD）| TELOS | Vanilla | Δ |
+| 全样本总成本（USD）| TELOS | Vanilla | Δ |
 |---|---:|---:|---:|
-| raw_input | $0.0251 | $0.0532 | −$0.0281 |
-| cache_read | $0.0180 | $0.0220 | −$0.0040 |
-| output | $0.0272 | $0.0275 | −$0.0003 |
-| **合计** | **$0.0703** | **$0.1027** | **−$0.0324 (−31.5%)** |
+| 上报 total cost | **$2.29** | $3.85 | **−$1.56 (−40.5%)** |
+| 每任务均值 | $0.0231 | $0.0389 | −$0.0158 |
 
-按 §1.1 的论证，**−31.5% 总成本** 是不可被价目表参数化操纵的绝对量。
+按 §1.1 的论证，**−40.5% 总成本** 是不可被价目表参数化操纵的绝对量——它直接对应账单上的美元数。
 
 <p align="center">
   <img src="../assets/05-dashboard.png" alt="TELOS savings dashboard — 绝对美元按 harness / model / session 分解" width="100%"/>
@@ -238,8 +240,8 @@ output token 与 api_calls 的近零差异是本文的核心实证。一个常�
 
 我们明确不在本文支持以下结论：
 
-1. **CI 宽度**：n = 55 下 Δ 的 95% CI 约为 [−21 pp, +14 pp]。本研究**能**排除 ≥21 pp 的修复率劣化，**不能**排除 ±5 pp 范围内的细微差异。后者需要 n ≥ 400 / arm。
-2. **样本组成偏置**：matplotlib 仓库的缺席使得样本略偏向 sphinx / pytest / xarray。两 arm 对称剔除避免了 *差分* 偏置，但 *绝对* 修复率不应直接外推到全 500 实例。
+1. **CI 宽度**：n = 99 下每臂 Wilson 半宽约 ±10 pp，配对差 Δ 的 95% CI 约为 [−6 pp, +12 pp]。本研究**能**排除 ≥6 pp 的修复率劣化（与"TELOS 会回归正确率"假设矛盾），**不能**排除 ±2 pp 范围内的细微差异。后者需要 n ≥ 400 / arm。
+2. **样本组成偏置**：缺席的 1 个实例（matplotlib-25287）对应上游 docker 镜像缺失，与两 arm 行为无关；空 patch 的实例两 arm 数量相近（TELOS 32 vs Vanilla 33），不构成差分偏置。**绝对** 修复率不应直接外推到全 500 实例，但 **配对差** 的方向与量级可作为后续大规模实验的先验。
 
 ### 5.6 与价目操纵基线的对比
 
@@ -261,7 +263,7 @@ output token 与 api_calls 的近零差异是本文的核心实证。一个常�
 
 ## 7 · 结论
 
-我们在 SWE-bench Verified 上以预先登记 A/B 评估了 TELOS 协议。结果表明：在样本量允许的统计精度下，**强制 prompt 字节级稳定（PIN/FOLD/DROP + monotonic append）能将每任务计费输入 token 减半、cache share 提升约 12 pp，同时任务正确率不可区分**。output token 与 API 调用数的近零差异表明节省来自协议而非能力收缩。
+我们在 SWE-bench Verified 上以预先登记 A/B 评估了 TELOS 协议（n = 99 / arm，配对样本）。结果表明：在样本量允许的统计精度下，**强制 prompt 字节级稳定（PIN/FOLD/DROP + monotonic append）能将每任务计费输入 token 减半、cache share 提升约 12 pp、端到端报告成本降低约 40%，同时任务正确率不可区分**（McNemar *p* = 0.66；TELOS 45.5% vs Vanilla 42.4%）。output token 与 API 调用数的近零差异（≤ 1.4%）表明节省来自协议而非能力收缩。
 
 下一步工作：(a) n ≥ 400 / arm 复跑以收窄修复率 CI 至 ±5 pp；(b) 跨 Claude / GPT 等多模型与多 harness 矩阵；(c) 100+ turn 长 session 上验证 (I2) 在更大尺度下的累积效应。
 

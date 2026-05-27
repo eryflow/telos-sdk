@@ -67,6 +67,12 @@ _DEFAULT_UPSTREAM = "https://api.anthropic.com"
 
 # Headers preserved when forwarding to upstream (auth / protocol version / Anthropic private beta).
 # Host / Content-Length are computed by aiohttp itself; do not pass them through from the client.
+# The OpenAI-side entries (``openai-*``, ``chatgpt-*``, ``session_id``, ``originator``) are
+# needed by Codex's Responses API: ``codex`` attaches ``OpenAI-Beta: responses=v1``, an
+# ``OpenAI-Organization`` / ``OpenAI-Project`` for billing routing, and proprietary
+# ``ChatGPT-Account-Id`` / ``session_id`` / ``originator`` headers that the Responses
+# endpoint relies on for conversation state. Dropping them caused the OpenAI server to
+# 400 even when the slug routing was correct.
 _FORWARD_HEADER_WHITELIST = (
     "x-api-key",
     "authorization",
@@ -74,6 +80,12 @@ _FORWARD_HEADER_WHITELIST = (
     "anthropic-beta",
     "anthropic-dangerous-direct-browser-access",
     "user-agent",
+    "openai-organization",
+    "openai-project",
+    "openai-beta",
+    "chatgpt-account-id",
+    "session_id",
+    "originator",
 )
 
 _log = logging.getLogger("telos.proxy")
@@ -1250,14 +1262,68 @@ class ProxyApp:
             )
         except aiohttp.ClientError as e:
             return _anthropic_error(502, "api_error", f"Upstream error: {e}")
+
+        status = upstream.status
+        ct = upstream.headers.get("content-type", "application/octet-stream")
+
+        # The OpenAI Responses API (used by Codex when ``wire_api = "responses"``)
+        # returns SSE on success: buffering the whole body would either hang for
+        # the lifetime of the stream or, worse, deliver the entire transcript as
+        # one blob at the end. Detect SSE on the content-type and forward
+        # chunk-by-chunk; otherwise buffer (cheap, and JSON tools expect a
+        # single response body).
+        if status == 200 and "text/event-stream" in ct.lower():
+            return await self._stream_passthrough(request, upstream, ct)
+
         try:
             body_bytes = await upstream.read()
-            status = upstream.status
-            ct = upstream.headers.get("content-type", "application/octet-stream")
         finally:
             upstream.release()
         return web.Response(body=body_bytes, status=status,
                             headers={"Content-Type": ct})
+
+    async def _stream_passthrough(
+        self,
+        request: web.Request,
+        upstream: aiohttp.ClientResponse,
+        content_type: str,
+    ) -> web.StreamResponse:
+        """Forward an SSE / chunked upstream response to the client without buffering.
+
+        Mirrors the chunk-forwarding loop from ``_stream_response`` (the
+        anthropic-messages path), but does not attempt any usage parsing — the
+        passthrough is a transparent tunnel for endpoints TELOS does not
+        understand (notably ``/v1/responses``).
+        """
+        downstream = web.StreamResponse(
+            status=upstream.status,
+            headers={
+                "Content-Type": content_type,
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            },
+        )
+        try:
+            await downstream.prepare(request)
+        except (ConnectionResetError, asyncio.CancelledError):
+            upstream.release()
+            return downstream
+
+        try:
+            async for chunk in upstream.content.iter_any():
+                try:
+                    await downstream.write(chunk)
+                except (ConnectionResetError, asyncio.CancelledError):
+                    break
+        except aiohttp.ClientPayloadError:
+            pass
+        finally:
+            upstream.release()
+        try:
+            await downstream.write_eof()
+        except Exception:  # noqa: BLE001
+            pass
+        return downstream
 
     async def _handle_openai_chat(
         self,
