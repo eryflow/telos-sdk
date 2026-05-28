@@ -1,8 +1,8 @@
 """``python -m telos.replay`` / ``telos replay`` entry point.
 
-Replays a real session from the corpus once for each of several modes; the
-results are appended to usage_log, and the dashboard's "A/B comparison" panel
-shows them side by side automatically (compare_group = the original session id).
+Replays a real session from the corpus once for each of several modes. Results
+are appended to usage_log with comparison metadata (compare_group = the original
+session id) so replay/showcase tooling can analyze modes side by side.
 
 Usage::
 
@@ -129,8 +129,8 @@ def _render_dashboard_frame(session_label: str, mode_order: list[str],
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="telos.replay",
-        description="Record → replay comparison: run the same session once for each of "
-                    "several modes; the results go into the dashboard's A/B comparison panel.",
+        description="Record → replay comparison: run the same session once for each "
+                    "of several modes and append comparison-tagged usage records.",
     )
     ap.add_argument("--corpus-dir", type=Path, default=DEFAULT_CORPUS_DIR,
                     help=f"session corpus directory (default {DEFAULT_CORPUS_DIR})")
@@ -238,7 +238,7 @@ def main(argv: list[str] | None = None) -> int:
     n = _append_records(args.usage_log, results)
     _print_summary(results)
     print(f"\nwrote {n} records · took {time.time() - t0:.1f}s")
-    print(f"view the comparison: telos dashboard --usage-log {args.usage_log}")
+    print(f"view savings totals: telos dashboard --usage-log {args.usage_log}")
     print(f"  (compare_group = {compare_group})")
     if recorder is not None:
         print(f"dashboard cast → {recorder.path}")

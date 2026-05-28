@@ -96,15 +96,12 @@ All mid-term goals are complete; the SDK transport and proxy paths are functiona
   - `apply_filter(raw, flt) -> (new_raw, FilterStats)`: shortens large bash output in `messages[].tool_result` before it enters the TELOS pipeline. On failure it always degrades to pass-through.
   - proxy adds a `--mode {none,telos,rtk,both}` CLI switch; a single request can override it with the `X-Telos-Mode` header (the first request's value is sticky to that session).
   - proxy adds an `X-Telos-Compare-Group` header: a grouping label for comparison experiments.
-- **savings dashboard comparison capability**: usage_log adds `mode` / `compare_group` / `tool_output_reduction` / `replay` fields.
-  - new "Breakdown by mode" table: TELOS cost savings + RTK token reduction side by side for each switch combination.
-  - new "A/B comparison" panel: sessions with the same `compare_group` but different modes are shown side by side, automatically highlighting the mode with the highest combined-saved. Cards carry a `replay` (controlled replay) or `live A/B` (real dual-session) badge.
-  - new KPI "RTK tool output removed".
+- **comparison metadata in usage logs**: usage_log adds `mode` / `compare_group` / `tool_output_reduction` / `replay` fields for replay/showcase analysis. The live savings dashboard remains focused on aggregate savings rather than rendering A/B panels.
 - **`telos.corpus`** — a session corpus. The proxy by default records each call's **original request** to `~/.telos/corpus/<session>.jsonl` (records requests only, not responses), for replay.
   - proxy adds `--corpus-dir` / `--no-record` switches.
 - **`telos.replay` + the `telos replay` subcommand** — a record → replay comparison engine.
   - replays a given real session from the corpus once per mode: byte-identical turn sequences, `max_tokens=1` to measure only prefill/cache billing, and injects a unique system prefix per mode for cache isolation.
-  - results are appended to usage_log, and the dashboard's "A/B comparison" panel places them side by side automatically (tagged with a `replay` badge).
+  - results are appended to usage_log with `compare_group` and `replay` metadata for downstream comparison tooling.
   - a controlled experiment that avoids the trajectory divergence noise of dual sessions; see [docs/replay-comparison.md](docs/replay-comparison.md) for the principle and limits.
   - CLI: `telos replay --list` / `telos replay --session <id> --modes none,telos,rtk,both`.
 - **`telos.proxy`** — an aiohttp SSE-aware Anthropic reverse proxy (path B).

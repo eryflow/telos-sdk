@@ -111,8 +111,8 @@ def test_replay_rtk_mode_shrinks_and_records_reduction() -> None:
     print("✓ test_replay_rtk_mode_shrinks_and_records_reduction")
 
 
-def test_replay_output_feeds_dashboard_compare_panel() -> None:
-    """Replay records should be picked up by dashboard aggregation into compare_groups + replay_groups."""
+def test_replay_output_keeps_comparison_metadata() -> None:
+    """Replay records keep comparison metadata without coupling it to the live dashboard."""
     sender, _ = _make_sender()
     all_recs = []
     for label in ("none", "telos", "rtk", "both"):
@@ -120,12 +120,11 @@ def test_replay_output_feeds_dashboard_compare_panel() -> None:
                            session_id="sess-Z", compare_group="sess-Z",
                            sender=sender)
         all_recs.extend(r.records)
+        assert all(rec["compare_group"] == "sess-Z" for rec in r.records)
+        assert all(rec["replay"] is True for rec in r.records)
     summary = aggregate(all_recs)
-    assert "sess-Z" in summary.compare_groups
-    assert set(summary.compare_groups["sess-Z"].keys()) == {
-        "none", "telos", "rtk", "both"}
-    assert "sess-Z" in summary.replay_groups
-    print("✓ test_replay_output_feeds_dashboard_compare_panel")
+    assert set(summary.by_mode.keys()) == {"none", "telos", "rtk", "both"}
+    print("✓ test_replay_output_keeps_comparison_metadata")
 
 
 def test_replay_on_turn_callback_fires_per_turn() -> None:
@@ -181,7 +180,7 @@ def main() -> None:
     test_replay_forces_max_tokens_and_strips_streaming()
     test_replay_injects_cache_namespace()
     test_replay_rtk_mode_shrinks_and_records_reduction()
-    test_replay_output_feeds_dashboard_compare_panel()
+    test_replay_output_keeps_comparison_metadata()
     test_replay_on_turn_callback_fires_per_turn()
     test_replay_strips_context_management()
     test_replay_retryable_classification()

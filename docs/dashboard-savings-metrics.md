@@ -94,7 +94,7 @@ implementations — the old version only counted the cache_read discount, overes
 
 ---
 
-## 2. Top Hero ("with TELOS, actual" perspective)
+## 2. Top Hero
 
 | Hero | Calculation |
 |---|---|
@@ -103,11 +103,7 @@ implementations — the old version only counted the cache_read discount, overes
 
 Subtitles:
 - `cache hits are X% of total prompt tokens` — `cache_read / (raw_input + cache_read + cache_write)`
-- `with TELOS off you'd expect to pay $A · actually paid $B · saved X%` — counterfactual vs actual vs ratio
-
-When switched to the "without TELOS · counterfactual" perspective, the hero becomes:
-- **prompt tokens (no cache)** = `raw_input + cache_read + cache_write` (all at the input price)
-- **cost (no TELOS)** = the counterfactual cost from §1.4
+- `TELOS prefix cache · X% off counterfactual cost` — `saved_usd / counterfactual_usd`
 
 ---
 
@@ -132,8 +128,7 @@ Colored by the four buckets:
 - 🟡 `cache_write` — wrote the cache (1.25× / 2× premium)
 - 🔵 `output` — generated tokens
 
-The "with TELOS" perspective shows the real four-color distribution.
-The "without TELOS · counterfactual" perspective collapses the first three into one orange block (all prompt tokens counted at the input price).
+The live dashboard shows the real four-color distribution. The counterfactual cost is used for the saved percentage, but it is not rendered as a separate perspective.
 
 ---
 
@@ -166,17 +161,9 @@ The three tables have the same structure, sorted by `cache_read` descending for 
 
 ---
 
-## 7. Perspective switching
+## 7. No A/B or perspective switching
 
-Three buttons at the top of the page:
-
-| Mode | What you see |
-|---|---|
-| **actual (TELOS on)** | the real four-color token mix, hit rate, actual saved $ |
-| **counterfactual (TELOS off)** | treats all prompt tokens as raw_input, estimating total cost at the input price |
-| **side by side** | the counterfactual big number on the left, the actual big number on the right, with a line at the bottom "net saved $X · X% off" |
-
-The choice is persisted via `localStorage.telos.dashboard.mode`.
+The live savings dashboard intentionally does not render A/B comparison panels, mode breakdown tables, or localStorage-backed perspective switching. `mode`, `compare_group`, and `replay` may still appear in usage records for replay/showcase workflows, but this page only answers the live savings question: how many tokens and dollars were saved overall, over time, and by harness / model / session.
 
 ---
 

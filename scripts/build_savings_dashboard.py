@@ -294,13 +294,6 @@ class Summary:
     by_session: dict[str, _Agg] = field(default_factory=lambda: defaultdict(_Agg))
     # Toggle dimension: mode ∈ {none, telos, rtk, both, passthrough, rtk-only}
     by_mode: dict[str, _Agg] = field(default_factory=lambda: defaultdict(_Agg))
-    # Comparison experiment: compare_group → mode → _Agg. Sessions of different
-    # modes under the same group are shown side by side on the dashboard.
-    compare_groups: dict[str, dict[str, _Agg]] = field(
-        default_factory=lambda: defaultdict(lambda: defaultdict(_Agg))
-    )
-    # Which compare_groups come from `telos replay` (controlled replay) rather than a real dual session.
-    replay_groups: set[str] = field(default_factory=set)
     # Time series: accumulate cache_read / saved_usd / counterfactual / cost / calls into hour buckets
     timeline: dict[str, dict[str, float]] = field(
         default_factory=lambda: defaultdict(lambda: {
@@ -359,7 +352,6 @@ def aggregate(records: Iterable[dict[str, Any]]) -> Summary:
         harness = harness_display_name(rec.get("harness") or "?")
         session = rec.get("session_id") or "(no-session)"
         mode = rec.get("mode") or "telos"
-        compare_group = rec.get("compare_group")
         ts = float(rec.get("ts") or 0.0)
 
         cost = _cost_usd(model, n_dict)
@@ -409,10 +401,6 @@ def aggregate(records: Iterable[dict[str, Any]]) -> Summary:
         _add(s.by_model[model or "(unknown)"])
         _add(s.by_session[session])
         _add(s.by_mode[mode])
-        if compare_group:
-            _add(s.compare_groups[compare_group][mode])
-            if rec.get("replay"):
-                s.replay_groups.add(compare_group)
         s.sessions_seen.add(session)
 
         if ts > 0:
