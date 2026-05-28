@@ -512,6 +512,27 @@ LOGO_SVG = """\
   <text class="telos-tg" x="168" y="104" font-family="'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="500" letter-spacing="3.4">PORTABLE AGENT CONTEXT</text>
 </svg>"""
 
+FAVICON_HREF = (
+    "data:image/svg+xml,"
+    "%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 148 140'%3E"
+    "%3Crect x='42' y='120' width='22' height='10' rx='5' fill='%234FB3BF'/%3E"
+    "%3Crect x='84' y='120' width='22' height='10' rx='5' fill='%234FB3BF'/%3E"
+    "%3CclipPath id='b'%3E%3Cpath d='M34 122 L34 45 Q34 15 74 15 Q114 15 114 45 L114 122 Z'/%3E%3C/clipPath%3E"
+    "%3Cg clip-path='url(%23b)'%3E"
+    "%3Crect x='30' y='10' width='88' height='58' fill='%237FD8E0'/%3E"
+    "%3Crect x='30' y='68' width='88' height='27' fill='%234FB3BF'/%3E"
+    "%3Crect x='30' y='95' width='88' height='35' fill='%232C5F66'/%3E"
+    "%3Cline x1='30' y1='95' x2='118' y2='95' stroke='%237FD8E0' stroke-width='2' opacity='.55'/%3E"
+    "%3C/g%3E"
+    "%3Ccircle cx='60' cy='40' r='8.5' fill='%231F4A50'/%3E"
+    "%3Ccircle cx='88' cy='40' r='8.5' fill='%231F4A50'/%3E"
+    "%3Ccircle cx='62.6' cy='37.4' r='2.8' fill='%23EAF7F9'/%3E"
+    "%3Ccircle cx='90.6' cy='37.4' r='2.8' fill='%23EAF7F9'/%3E"
+    "%3Cpath d='M64 53 Q74 61 84 53' fill='none' stroke='%231F4A50' stroke-width='3.2' stroke-linecap='round'/%3E"
+    "%3Cpath d='M34 122 L34 45 Q34 15 74 15 Q114 15 114 45 L114 122 Z' fill='none' stroke='%23EAF7F9' stroke-width='2.5'/%3E"
+    "%3C/svg%3E"
+)
+
 CSS = """
 :root { color-scheme: dark; }
 * { box-sizing: border-box; }
@@ -535,6 +556,8 @@ header h1 { margin: 0 0 6px 0; font-size: 28px; font-weight: 700;
   flex-wrap: wrap;
 }
 .brand-logo { height: 48px; width: auto; display: block; }
+.title-lockup { display: inline-flex; align-items: center; gap: 12px; min-width: 0; }
+.title-text { color: #adb6c2; font-size: 18px; font-weight: 500; white-space: nowrap; }
 
 /* ---- reset button ---- */
 .reset-btn {
@@ -644,20 +667,29 @@ header .sub { color: #7d8590; font-size: 13px; }
   border-radius: 2px; vertical-align: middle; margin-right: 5px; }
 
 /* ---- table ---- */
+.table-scroll {
+  width: 100%; max-width: 100%; overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
 table {
   width: 100%; border-collapse: collapse; font-size: 12.5px;
   font-variant-numeric: tabular-nums;
 }
+.breakdown-table { min-width: 720px; table-layout: fixed; }
 th, td { padding: 8px 10px; border-bottom: 1px solid #21262d; text-align: right;
   vertical-align: middle; }
 th { font-weight: 500; color: #7d8590; text-transform: uppercase;
   font-size: 10.5px; letter-spacing: 0.05em; }
 th.left, td.left { text-align: left; }
-td.left { font-family: monospace; }
+th.left { width: 34%; }
+td.left {
+  font-family: monospace; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis;
+}
 tr:hover td { background: #131822; }
 
 .bar-cell {
-  position: relative; width: 220px;
+  position: relative; width: 150px;
   background: #161b22; border-radius: 3px; overflow: hidden;
 }
 .bar-cell .fill {
@@ -870,7 +902,8 @@ def _render_breakdown_table(label: str, data: dict[str, _Agg],
     return f"""
 <div class="card">
   <h2>{html.escape(label)}</h2>
-  <table>
+  <div class="table-scroll">
+  <table class="breakdown-table">
     <thead><tr>
       <th class="left">{html.escape(key_label)}</th>
       <th>calls</th>
@@ -882,6 +915,7 @@ def _render_breakdown_table(label: str, data: dict[str, _Agg],
     </tr></thead>
     <tbody>{''.join(rows)}</tbody>
   </table>
+  </div>
 </div>
 """
 
@@ -1088,7 +1122,8 @@ def render_dashboard(
 <html lang="en"><head>
 <meta charset="utf-8">
 {refresh_tag}
-<title>TELOS · Token Savings Dashboard</title>
+<title>TELOS · Token Savings</title>
+<link rel="icon" type="image/svg+xml" href="{FAVICON_HREF}">
 <style>{CSS}</style>
 </head><body>
 <div class="wrap">
@@ -1096,7 +1131,7 @@ def render_dashboard(
 <header>
   <div class="header-row">
     <div>
-      <h1>{LOGO_SVG} {mode_badge}</h1>
+      <h1><span class="title-lockup">{LOGO_SVG}<span class="title-text">Token Savings</span></span>{mode_badge}</h1>
       <div class="sub">
         {n_calls:,} calls · {n_sessions:,} sessions · span {span_s}
         · generated {ts_now}{refresh_note}
@@ -1257,6 +1292,7 @@ def _render_empty(title: str, body: str, *,
 <meta charset="utf-8">
 {refresh_tag}
 <title>TELOS · Token Savings</title>
+<link rel="icon" type="image/svg+xml" href="{FAVICON_HREF}">
 <style>{CSS}</style>
 </head><body><div class="wrap">
 <div class="welcome">
