@@ -125,7 +125,7 @@ telos-sdk/                         (Python package name = telos; pyproject maps 
 ├── scripts/
 │   ├── telos_anthropic_transport.py   Integration path A (Anthropic shape) + _detect_harness
 │   ├── telos_transport.py             Integration path A (OpenAI shape)
-│   ├── build_savings_dashboard.py     Savings dashboard (with mode / A/B comparison panels)
+│   ├── build_savings_dashboard.py     Live savings dashboard
 │   ├── build_developer_page.py        Developer inspector page
 │   └── show_prompt_trace.py           Terminal pretty-printer for prompt_trace.jsonl
 │
@@ -660,9 +660,7 @@ Shared by the proxy and the SDK transport. One jsonl line per call. Key fields: 
 
 `telos dashboard` or the proxy-embedded `/__telos/dashboard`. Aggregates usage_log into
 "how many tokens / how many dollars saved". Includes the 2026 price table (with the cache_write 5m/1h split).
-New in this batch: a **Breakdown by mode** table + an **A/B comparison** panel (different modes under the same `compare_group`
-shown side by side, replay groups marked with a `replay` badge, dual sessions marked `live A/B`) +
-the **RTK tool output removed** KPI.
+The live dashboard intentionally stays focused on savings totals, timeline, and breakdowns by harness / model / session; replay and showcase comparison records keep their `compare_group` metadata outside this page.
 
 ### 12.3 Developer Page ([build_developer_page.py](../scripts/build_developer_page.py))
 

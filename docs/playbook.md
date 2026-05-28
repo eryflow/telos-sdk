@@ -409,7 +409,7 @@ jq -c '{call: .call_index, cache_read: .normalized.cache_read, cum: .cumulative.
 
 | Dashboard | Entry point | What it shows | Use |
 |---|---|---|---|
-| 💰 **Savings dashboard** | `/__telos/dashboard` or `telos dashboard` | how many tokens / dollars saved, A/B comparison, mode breakdown | show to the boss |
+| 💰 **Savings dashboard** | `/__telos/dashboard` or `telos dashboard` | live tokens / dollars saved, timeline, breakdown by harness / model / session | show to the boss |
 | 🔬 **Developer page** | `/__telos/developer` | the IR structure of each in-memory session right now, PIN/FOLD/DROP distribution, tool stats | self-check cache-hit behavior |
 | 📜 **usage_log** | `~/.telos/usage.jsonl` | per-call raw data | `jq` / plot it yourself |
 
@@ -425,7 +425,7 @@ jq -c '{call: .call_index, cache_read: .normalized.cache_read, cum: .cumulative.
 flowchart TB
   subgraph Replay["✅ replay (recommended, controlled, cheap)"]
     R1[record one real session] --> R2[the same request stream<br/>byte-for-byte identical<br/>replayed under each of 4 modes]
-    R2 --> R3[A/B panel comparison<br/>the only variable = the switch]
+    R2 --> R3[comparison-tagged usage records<br/>the only variable = the switch]
   end
 
   subgraph Dual["⚠️ dual session (end-to-end, noisy)"]
@@ -442,14 +442,14 @@ flowchart TB
 ```bash
 telos replay --list                              # see which sessions are in the corpus
 telos replay --session <id>                       # by default runs all 4 modes
-telos dashboard --usage-log ~/.telos/usage.jsonl  # view results in the A/B comparison panel
+telos dashboard --usage-log ~/.telos/usage.jsonl  # view the resulting savings totals
 ```
 
 The input each mode sees is exactly identical, and **the only variable is the switch itself**. Low cost: 1 real session + a stream of cheap `max_tokens=1` prefill calls per mode.
 
 ### 12.2 dual session: end-to-end, but a single run is not trustworthy
 
-Start two independent agent sessions with identical user input, each carrying a different `X-Telos-Mode` plus the same `X-Telos-Compare-Group`, and the dashboard places them side by side in the same panel.
+Start two independent agent sessions with identical user input, each carrying a different `X-Telos-Mode` plus the same `X-Telos-Compare-Group`. The usage records retain that shared comparison key for replay/showcase analysis, but the live savings dashboard does not render a side-by-side A/B panel.
 
 **The delta of a single run is not trustworthy** (the trajectory diverges due to sampling, and different tool results lead to different downstream decisions). **Use it only for the occasional end-to-end validation**, and run it multiple times to average.
 

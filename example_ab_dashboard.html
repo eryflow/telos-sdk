@@ -2,7 +2,8 @@
 <html lang="en"><head>
 <meta charset="utf-8">
 
-<title>TELOS · Token Savings Dashboard</title>
+<title>TELOS · A/B Savings Example</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 148 140'%3E%3Crect x='42' y='120' width='22' height='10' rx='5' fill='%234FB3BF'/%3E%3Crect x='84' y='120' width='22' height='10' rx='5' fill='%234FB3BF'/%3E%3CclipPath id='b'%3E%3Cpath d='M34 122 L34 45 Q34 15 74 15 Q114 15 114 45 L114 122 Z'/%3E%3C/clipPath%3E%3Cg clip-path='url(%23b)'%3E%3Crect x='30' y='10' width='88' height='58' fill='%237FD8E0'/%3E%3Crect x='30' y='68' width='88' height='27' fill='%234FB3BF'/%3E%3Crect x='30' y='95' width='88' height='35' fill='%232C5F66'/%3E%3Cline x1='30' y1='95' x2='118' y2='95' stroke='%237FD8E0' stroke-width='2' opacity='.55'/%3E%3C/g%3E%3Ccircle cx='60' cy='40' r='8.5' fill='%231F4A50'/%3E%3Ccircle cx='88' cy='40' r='8.5' fill='%231F4A50'/%3E%3Ccircle cx='62.6' cy='37.4' r='2.8' fill='%23EAF7F9'/%3E%3Ccircle cx='90.6' cy='37.4' r='2.8' fill='%23EAF7F9'/%3E%3Cpath d='M64 53 Q74 61 84 53' fill='none' stroke='%231F4A50' stroke-width='3.2' stroke-linecap='round'/%3E%3Cpath d='M34 122 L34 45 Q34 15 74 15 Q114 15 114 45 L114 122 Z' fill='none' stroke='%23EAF7F9' stroke-width='2.5'/%3E%3C/svg%3E">
 <style>
 :root { color-scheme: dark; }
 * { box-sizing: border-box; }
@@ -18,11 +19,12 @@ body {
 
 header { margin-bottom: 32px; }
 header h1 { margin: 0 0 6px 0; font-size: 28px; font-weight: 700;
-  letter-spacing: -0.01em;
-  background: linear-gradient(120deg, #79c0ff 0%, #d2a8ff 100%);
-  -webkit-background-clip: text; background-clip: text;
-  -webkit-text-fill-color: transparent;
+  letter-spacing: -0.01em; display: flex; align-items: center; gap: 12px;
+  flex-wrap: wrap;
 }
+.brand-logo { height: 48px; width: auto; display: block; }
+.title-lockup { display: inline-flex; align-items: center; gap: 12px; min-width: 0; }
+.title-text { color: #adb6c2; font-size: 18px; font-weight: 500; white-space: nowrap; }
 header .sub { color: #7d8590; font-size: 13px; }
 
 /* ---- hero stats ---- */
@@ -104,20 +106,29 @@ header .sub { color: #7d8590; font-size: 13px; }
   border-radius: 2px; vertical-align: middle; margin-right: 5px; }
 
 /* ---- table ---- */
+.table-scroll {
+  width: 100%; max-width: 100%; overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
 table {
   width: 100%; border-collapse: collapse; font-size: 12.5px;
   font-variant-numeric: tabular-nums;
 }
+.breakdown-table { min-width: 720px; table-layout: fixed; }
 th, td { padding: 8px 10px; border-bottom: 1px solid #21262d; text-align: right;
   vertical-align: middle; }
 th { font-weight: 500; color: #7d8590; text-transform: uppercase;
   font-size: 10.5px; letter-spacing: 0.05em; }
 th.left, td.left { text-align: left; }
-td.left { font-family: monospace; }
+th.left { width: 34%; }
+td.left {
+  font-family: monospace; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis;
+}
 tr:hover td { background: #131822; }
 
 .bar-cell {
-  position: relative; width: 220px;
+  position: relative; width: 150px;
   background: #161b22; border-radius: 3px; overflow: hidden;
 }
 .bar-cell .fill {
@@ -178,7 +189,44 @@ tr:hover td { background: #131822; }
 <div class="wrap">
 
 <header>
-  <h1>TELOS · Token Savings</h1>
+  <h1><span class="title-lockup"><svg class="brand-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 140" role="img" aria-label="TELOS — Portable Agent Context">
+  <title>TELOS</title>
+  <style>
+    .telos-wm    { fill: #EAF7F9; }
+    .telos-tg    { fill: #82A6AB; }
+    .telos-stone { stroke: #EAF7F9; }
+    .telos-feet  { fill: #4FB3BF; }
+  </style>
+  <defs>
+    <clipPath id="telos-body">
+      <path d="M34 122 L34 45 Q34 15 74 15 Q114 15 114 45 L114 122 Z"/>
+    </clipPath>
+  </defs>
+  <g class="telos-feet">
+    <rect x="42" y="120" width="22" height="10" rx="5"/>
+    <rect x="84" y="120" width="22" height="10" rx="5"/>
+  </g>
+  <g clip-path="url(#telos-body)">
+    <rect x="30" y="10" width="88" height="58" fill="#7FD8E0"/>
+    <rect x="30" y="68" width="88" height="27" fill="#4FB3BF"/>
+    <rect x="30" y="95" width="88" height="35" fill="#2C5F66"/>
+    <g stroke="#1F4A50" stroke-width="3" stroke-linecap="round" opacity="0.30">
+      <line x1="49" y1="74" x2="93" y2="74"/>
+      <line x1="49" y1="85" x2="84" y2="85"/>
+    </g>
+    <line x1="30" y1="95" x2="118" y2="95" stroke="#7FD8E0" stroke-width="2" opacity="0.55"/>
+  </g>
+  <g>
+    <circle cx="60" cy="40" r="8.5" fill="#1F4A50"/>
+    <circle cx="88" cy="40" r="8.5" fill="#1F4A50"/>
+    <circle cx="62.6" cy="37.4" r="2.8" fill="#EAF7F9"/>
+    <circle cx="90.6" cy="37.4" r="2.8" fill="#EAF7F9"/>
+    <path d="M64 53 Q74 61 84 53" fill="none" stroke="#1F4A50" stroke-width="3.2" stroke-linecap="round"/>
+  </g>
+  <path class="telos-stone" d="M34 122 L34 45 Q34 15 74 15 Q114 15 114 45 L114 122 Z" fill="none" stroke-width="2.5"/>
+  <text class="telos-wm" x="166" y="78" font-family="'Helvetica Neue', Arial, sans-serif" font-size="62" font-weight="700" letter-spacing="3">TELOS</text>
+  <text class="telos-tg" x="168" y="104" font-family="'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="500" letter-spacing="3.4">PORTABLE AGENT CONTEXT</text>
+</svg><span class="title-text">Token Savings</span></span></h1>
   <div class="sub">
     64 calls · 8 sessions · span 42.0 minutes
     · generated 2026-05-15 11:42 UTC
@@ -425,7 +473,8 @@ saved: $1.15</title></circle>
 
 <div class="card">
   <h2>Breakdown by mode (switch comparison)</h2>
-  <table>
+  <div class="table-scroll">
+  <table class="breakdown-table">
     <thead><tr>
       <th class="left">mode</th>
       <th>calls</th>
@@ -436,6 +485,7 @@ saved: $1.15</title></circle>
     </tr></thead>
     <tbody><tr><td class="left"><b style="color:#d2a8ff">both</b><br><span class="muted" style="font-size:10px">TELOS prefix cache + RTK tool filtering</span></td><td>16</td><td class="green">$0.717</td><td class="gold">41.24K</td><td class="gold">$0.206</td><td class="bar-cell"><span class="fill" style="width:82.6%"></span><span class="label-overlay">$0.924</span></td></tr><tr><td class="left"><b style="color:#3fb950">telos</b><br><span class="muted" style="font-size:10px">TELOS prefix cache only</span></td><td>16</td><td class="green">$1.12</td><td class="gold">0</td><td class="gold">$0.0000</td><td class="bar-cell"><span class="fill" style="width:100.0%"></span><span class="label-overlay">$1.12</span></td></tr><tr><td class="left"><b style="color:#f0883e">rtk</b><br><span class="muted" style="font-size:10px">RTK tool filtering only</span></td><td>16</td><td class="green">$0.0000</td><td class="gold">41.24K</td><td class="gold">$0.206</td><td class="bar-cell"><span class="fill" style="width:18.4%"></span><span class="label-overlay">$0.206</span></td></tr><tr><td class="left"><b style="color:#7d8590">none</b><br><span class="muted" style="font-size:10px">pure passthrough, no optimization</span></td><td>16</td><td class="green">$0.0000</td><td class="gold">0</td><td class="gold">$0.0000</td><td class="bar-cell"><span class="fill" style="width:0.0%"></span><span class="label-overlay">$0.0000</span></td></tr></tbody>
   </table>
+  </div>
   <p class="muted" style="font-size:11px;margin-top:8px">
     TELOS saved $ = money saved by prefix cache vs "no cache_control";
     RTK saved $ = filtered tool-output characters converted to tokens × input price (upper-bound estimate).
@@ -446,7 +496,8 @@ saved: $1.15</title></circle>
 
 <div class="card">
   <h2>Breakdown by harness</h2>
-  <table>
+  <div class="table-scroll">
+  <table class="breakdown-table">
     <thead><tr>
       <th class="left">harness</th>
       <th>calls</th>
@@ -458,12 +509,14 @@ saved: $1.15</title></circle>
     </tr></thead>
     <tbody><tr><td class="left">hermes</td><td>64</td><td>586.83K</td><td class="green">427.96K</td><td>71.90K</td><td>39.4%</td><td class="bar-cell"><span class="fill" style="width:100.0%"></span><span class="label-overlay">$1.84</span></td></tr></tbody>
   </table>
+  </div>
 </div>
 
 
 <div class="card">
   <h2>Breakdown by model</h2>
-  <table>
+  <div class="table-scroll">
+  <table class="breakdown-table">
     <thead><tr>
       <th class="left">model</th>
       <th>calls</th>
@@ -475,12 +528,14 @@ saved: $1.15</title></circle>
     </tr></thead>
     <tbody><tr><td class="left">claude-opus-4-7</td><td>64</td><td>586.83K</td><td class="green">427.96K</td><td>71.90K</td><td>39.4%</td><td class="bar-cell"><span class="fill" style="width:100.0%"></span><span class="label-overlay">$1.84</span></td></tr></tbody>
   </table>
+  </div>
 </div>
 
 
 <div class="card">
   <h2>Top sessions by saved $</h2>
-  <table>
+  <div class="table-scroll">
+  <table class="breakdown-table">
     <thead><tr>
       <th class="left">session_id</th>
       <th>calls</th>
@@ -492,6 +547,7 @@ saved: $1.15</title></circle>
     </tr></thead>
     <tbody><tr><td class="left">fix-auth-bug/telos</td><td>9</td><td>16.42K</td><td class="green">160.06K</td><td>28.73K</td><td>78.0%</td><td class="bar-cell"><span class="fill" style="width:100.0%"></span><span class="label-overlay">$0.684</span></td></tr><tr><td class="left">fix-auth-bug/both</td><td>9</td><td>10.19K</td><td class="green">101.78K</td><td>15.26K</td><td>80.0%</td><td class="bar-cell"><span class="fill" style="width:64.1%"></span><span class="label-overlay">$0.439</span></td></tr><tr><td class="left">add-csv-export/telos</td><td>7</td><td>10.42K</td><td class="green">101.56K</td><td>18.23K</td><td>78.0%</td><td class="bar-cell"><span class="fill" style="width:63.5%"></span><span class="label-overlay">$0.434</span></td></tr><tr><td class="left">add-csv-export/both</td><td>7</td><td>6.46K</td><td class="green">64.58K</td><td>9.68K</td><td>80.0%</td><td class="bar-cell"><span class="fill" style="width:40.7%"></span><span class="label-overlay">$0.278</span></td></tr><tr><td class="left">fix-auth-bug/none</td><td>9</td><td>205.20K</td><td class="green">0</td><td>0</td><td>0.0%</td><td class="bar-cell"><span class="fill" style="width:0.0%"></span><span class="label-overlay">$0.0000</span></td></tr><tr><td class="left">fix-auth-bug/rtk</td><td>9</td><td>127.22K</td><td class="green">0</td><td>0</td><td>0.0%</td><td class="bar-cell"><span class="fill" style="width:0.0%"></span><span class="label-overlay">$0.0000</span></td></tr><tr><td class="left">add-csv-export/none</td><td>7</td><td>130.20K</td><td class="green">0</td><td>0</td><td>0.0%</td><td class="bar-cell"><span class="fill" style="width:0.0%"></span><span class="label-overlay">$0.0000</span></td></tr><tr><td class="left">add-csv-export/rtk</td><td>7</td><td>80.72K</td><td class="green">0</td><td>0</td><td>0.0%</td><td class="bar-cell"><span class="fill" style="width:0.0%"></span><span class="label-overlay">$0.0000</span></td></tr></tbody>
   </table>
+  </div>
 </div>
 
 

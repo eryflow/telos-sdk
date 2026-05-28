@@ -176,8 +176,10 @@ def test_uninstall_skips_when_user_manually_changed(tmp_path: Path) -> None:
         config_path.write_text(json.dumps(data, indent=2))
 
         r = inst.uninstall()
-        # No change to the file.
-        assert not r.changed_files
+        # Openclaw's own openclaw.json is left alone (the user clearly
+        # picked a different route); state file is preserved so a later
+        # legitimate uninstall can still restore.
+        assert config_path not in r.changed_files
         data2 = json.loads(config_path.read_text())
         assert (data2["models"]["providers"]["deepseek"]["baseUrl"]
                 == "https://something-else")

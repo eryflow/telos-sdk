@@ -77,7 +77,7 @@ def test_scene_replay_produces_four_modes() -> None:
     records = sc._run_replays(sc.build_demo_corpus(), sc.load_responses())
     modes = {r["mode"] for r in records}
     assert modes == set(sc.REPLAY_MODES)
-    # every record carries the compare_group so the dashboard A/B panel groups them
+    # every record carries the compare_group so replay/showcase analysis can group them
     assert all(r["compare_group"] == sc.COMPARE_GROUP for r in records)
     by_mode = sc._aggregate_by_mode(records)
     # TELOS modes resolve a cacheable prefix; passthrough does not

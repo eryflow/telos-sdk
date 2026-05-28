@@ -115,6 +115,26 @@ def test_render_shows_mode_badge() -> None:
     print("✓ test_render_shows_mode_badge")
 
 
+def test_render_uses_logo_title_and_scrollable_tables() -> None:
+    """The dashboard header uses the TELOS logo and wide breakdown tables stay contained."""
+    summary = aggregate([
+        _rec(
+            raw_input=5000,
+            cache_read=50000,
+            session="very-long-session-id-that-should-not-push-the-dashboard-past-the-edge",
+        )
+    ])
+    html_doc = render_dashboard(summary, [Path("sample.jsonl")])
+    assert 'class="brand-logo"' in html_doc
+    assert 'class="title-lockup"' in html_doc
+    assert "<title>TELOS · Token Savings</title>" in html_doc
+    assert 'rel="icon"' in html_doc
+    assert "Token Savings" in html_doc
+    assert 'class="table-scroll"' in html_doc
+    assert 'class="breakdown-table"' in html_doc
+    print("✓ test_render_uses_logo_title_and_scrollable_tables")
+
+
 def main() -> None:
     test_rtk_tokens_prefer_logged_token_fields()
     test_rtk_tokens_fall_back_to_chars_for_old_logs()
@@ -123,6 +143,7 @@ def main() -> None:
     test_render_shows_total_cost_saved()
     test_rtk_status_distinguishes_disabled_from_zero_save()
     test_render_shows_mode_badge()
+    test_render_uses_logo_title_and_scrollable_tables()
     print("\nall savings_dashboard tests passed.")
 
 
