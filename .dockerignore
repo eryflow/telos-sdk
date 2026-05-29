@@ -1,0 +1,22 @@
+# Generated artifacts
+dist/
+build/
+*.egg-info/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# VCS / IDE
+.git/
+.github/
+.vscode/
+.idea/
+
+# Local docs / examples that aren't needed inside the image
+site/
+docs/_build/
+*.log

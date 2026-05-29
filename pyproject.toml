@@ -42,6 +42,12 @@ dependencies = [
     "pyyaml>=6.0",
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+]
+
 [project.urls]
 Homepage = "https://github.com/learningCatHD/telos-sdk"
 Repository = "https://github.com/learningCatHD/telos-sdk"
