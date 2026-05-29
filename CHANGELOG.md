@@ -9,6 +9,22 @@ The format follows Keep a Changelog; dates are absolute.
 
 ---
 
+## [0.1.5] — 2026-05-28
+
+### Changed
+
+- **Live dashboard separated from replay comparisons.** Dashboard now distinguishes
+  live gateway traffic from A/B replay results, with refreshed branding and
+  improved table layout.
+
+### Fixed
+
+- **Uninstall flow** correctly removes Codex/Hermes/OpenClaw harness configs.
+- **Install method** updates for Codex (`init/codex.py`), Hermes
+  (`init/hermes.py`), and OpenClaw (`init/openclaw.py`).
+
+---
+
 ## [0.1.4] — 2026-05-27
 
 Codex (`wire_api = "responses"`) is now a first-class harness on the gateway.

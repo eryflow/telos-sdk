@@ -17,7 +17,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from telos.config import load_config
+from telos.config import config_path, load_config
 from telos.harnesses import HARNESS_NAMES, detect_installed
 from telos.init import INSTALLERS
 from telos.init.base import InstallResult
@@ -43,7 +43,7 @@ def _make_installer(name: str, gateway_url: str):
     return factory(proxy_url=gateway_url)
 
 
-def _run_one(name: str, gateway_url: str, *, uninstall: bool, status: bool) -> int:
+def _run_one(name: str, gateway_url: str, *, uninstall: bool, status: bool) -> tuple[int, InstallResult | None]:
     try:
         installer = _make_installer(name, gateway_url)
         if status:
@@ -54,23 +54,35 @@ def _run_one(name: str, gateway_url: str, *, uninstall: bool, status: bool) -> i
             result = installer.install()
     except Exception as e:  # noqa: BLE001
         print(f"[{name}] error: {e}", file=sys.stderr)
-        return 1
+        return 1, None
     print(_render(result))
-    return 0
+    return 0, result
 
 
-def _start_gateway() -> None:
-    """Start the gateway in the background after injection completes, and print the address."""
+def _start_gateway(*, config_changed: bool) -> None:
+    """Start the gateway in the background after injection completes, and print the address.
+
+    If the gateway is already running AND an installer mutated ``~/.telos/config.json``
+    (e.g. registered a new upstream slug), restart it so the new config takes effect —
+    otherwise the gateway keeps serving with its boot-time in-memory upstreams table
+    and 404s on the freshly-added slug.
+    """
     from telos.gateway import daemon
 
+    existing = daemon.read_state()
     try:
-        state = daemon.start_detached()
+        if existing is not None and config_changed:
+            state = daemon.restart()
+            print()
+            print(f"✓ gateway restarted to pick up the new ~/.telos/config.json → {state.base_url()}  (mode={state.mode})")
+        else:
+            state = daemon.start_detached()
+            print()
+            print(f"✓ gateway running → {state.base_url()}  (mode={state.mode})")
     except RuntimeError as e:
         print(f"warning: gateway failed to start: {e}", file=sys.stderr)
         print("        you can run it manually later: telos gateway start")
         return
-    print()
-    print(f"✓ gateway running → {state.base_url()}  (mode={state.mode})")
     print(f"  dashboard     → {state.dashboard_url()}")
     print("  open the dashboard: telos dashboard")
 
@@ -142,13 +154,18 @@ def main(argv: list[str] | None = None) -> int:
 
     # ---- Execute one by one ----
     rc = 0
+    telos_config_path = config_path()
+    config_changed = False
     for name in targets:
-        rc |= _run_one(name, gateway_url, uninstall=args.uninstall,
-                       status=args.status)
+        sub_rc, result = _run_one(name, gateway_url, uninstall=args.uninstall,
+                                  status=args.status)
+        rc |= sub_rc
+        if result is not None and telos_config_path in result.changed_files:
+            config_changed = True
 
     # ---- Start the gateway after a successful install ----
     if not args.uninstall and not args.status and not args.no_gateway and rc == 0:
-        _start_gateway()
+        _start_gateway(config_changed=config_changed)
 
     return rc
 
