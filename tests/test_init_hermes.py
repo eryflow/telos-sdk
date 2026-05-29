@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+import pytest
 
 from telos.init.hermes import HermesInstaller
 
@@ -291,5 +292,45 @@ def test_uninstall_restores_auth_json_credential_pool(tmp_path: Path) -> None:
         auth = json.loads(auth_path.read_text())
         pool_url = auth["credential_pool"]["openrouter"][0]["base_url"]
         assert pool_url == "https://openrouter.ai/api/v1"
+    finally:
+        _restore_env()
+
+
+def test_install_corrupted_yaml_gives_clear_error(tmp_path: Path) -> None:
+    """A corrupted config.yaml must not propagate a raw YAMLError —
+    the user needs to know which file to fix and where the backup is."""
+    config_path = tmp_path / "config.yaml"
+    # Unbalanced bracket — yaml.safe_load raises ScannerError.
+    config_path.write_text("model:\n  base_url: [unclosed\n", encoding="utf-8")
+    os.environ["TELOS_HOME"] = str(tmp_path / "telos-home")
+    try:
+        inst = HermesInstaller(
+            config_path=config_path,
+            state_path=tmp_path / "state.json",
+        )
+        with pytest.raises(RuntimeError) as excinfo:
+            inst.install()
+        msg = str(excinfo.value)
+        assert "not valid YAML" in msg
+        assert str(config_path) in msg
+        assert ".telos.bak" in msg
+    finally:
+        _restore_env()
+
+
+def test_install_empty_config_treated_as_missing(tmp_path: Path) -> None:
+    """A zero-byte config.yaml is "config doesn't exist yet", not a crash."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("", encoding="utf-8")
+    os.environ["TELOS_HOME"] = str(tmp_path / "telos-home")
+    try:
+        inst = HermesInstaller(
+            config_path=config_path,
+            state_path=tmp_path / "state.json",
+        )
+        r = inst.install()
+        assert not r.changed_files
+        assert any("does not exist" in n or "YAML mapping" in n or "hermes" in n
+                   for n in r.notes)
     finally:
         _restore_env()

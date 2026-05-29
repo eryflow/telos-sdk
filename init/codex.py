@@ -93,17 +93,77 @@ class _PreparedConfig:
     previous_model_provider: str | None
 
 
-def _strip_block(text: str, begin: str, end: str) -> str:
-    start = text.find(begin)
+def _find_marker(text: str, marker: str, *, start: int = 0) -> int:
+    """Find a marker line; tolerant of a missing trailing newline at EOF.
+
+    Codex itself rewrites ``config.toml`` periodically (project trust,
+    settings UI, plugin install) and at least one of those code paths drops
+    the final ``\\n``. The original markers all end in ``\\n``; without this
+    fallback, ``text.find(marker)`` then returns -1 and the installer raises
+    ``"found a TELOS managed Codex block without its end marker"``, which
+    silently no-ops the codex install for the rest of the session.
+    """
+    idx = text.find(marker, start)
+    if idx >= 0:
+        return idx
+    bare = marker.rstrip("\n")
+    idx = text.find(bare, start)
+    if idx >= 0 and idx + len(bare) == len(text):
+        return idx
+    return -1
+
+
+def _strip_block(text: str, begin: str, end: str) -> tuple[str, str]:
+    """Remove a managed block; return ``(remaining_text, block_inner_text)``.
+
+    ``block_inner_text`` is the text **between** the begin and end markers
+    (exclusive), so callers can recover any foreign lines that an external
+    rewriter accidentally wedged inside the managed region.
+    """
+    start = _find_marker(text, begin)
     if start < 0:
-        return text
-    stop = text.find(end, start)
+        return text, ""
+    inner_start = start + len(begin)
+    stop = _find_marker(text, end, start=inner_start)
     if stop < 0:
         raise RuntimeError("found a TELOS managed Codex block without its end marker")
-    stop += len(end)
+    inner = text[inner_start:stop]
+    # consume the actual length of the end marker we matched (may be missing \n at EOF)
+    end_len = len(end) if text[stop:stop + len(end)] == end else len(end.rstrip("\n"))
+    stop += end_len
     if stop < len(text) and text[stop] == "\n":
         stop += 1
-    return text[:start] + text[stop:]
+    return text[:start] + text[stop:], inner
+
+
+def _strip_provider_table_from(inside: str) -> str:
+    """Remove our own ``[model_providers.telos]`` table from a block's inner
+    text. Returns whatever foreign content was left in the block.
+
+    A TOML table runs from its ``[header]`` line to the next bracketed header
+    or to end-of-input — that's the unit we strip. Everything before the
+    table header and everything from the next ``[header]`` onward is foreign
+    and must be preserved (codex sometimes reorders unrelated tables into
+    our managed region; we don't want to delete the user's projects, mcp
+    servers, or shell-env policy by accident).
+    """
+    lines = inside.splitlines(keepends=True)
+    out: list[str] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        if lines[i].strip() == "[model_providers.telos]":
+            i += 1
+            while i < n:
+                stripped = lines[i].lstrip()
+                # next table header (single [ or double [[) ends ours
+                if stripped.startswith("[") and not stripped.startswith("#"):
+                    break
+                i += 1
+            continue
+        out.append(lines[i])
+        i += 1
+    return "".join(out)
 
 
 def _remove_top_level_model_provider(text: str) -> _PreparedConfig:
@@ -137,13 +197,14 @@ def _extract_previous_model_provider(root_block: str) -> str | None:
 
 
 def _extract_block(text: str, begin: str, end: str) -> str | None:
-    start = text.find(begin)
+    start = _find_marker(text, begin)
     if start < 0:
         return None
-    stop = text.find(end, start)
+    stop = _find_marker(text, end, start=start + len(begin))
     if stop < 0:
         raise RuntimeError("found a TELOS managed Codex block without its end marker")
-    return text[start:stop + len(end)]
+    end_len = len(end) if text[stop:stop + len(end)] == end else len(end.rstrip("\n"))
+    return text[start:stop + end_len]
 
 
 class CodexInstaller(AgentInstaller):
@@ -222,8 +283,29 @@ class CodexInstaller(AgentInstaller):
             if root_block is not None
             else None
         )
-        text = _strip_block(original, _ROOT_BEGIN, _ROOT_END)
-        text = _strip_block(text, _PROVIDER_BEGIN, _PROVIDER_END)
+        text, root_inner = _strip_block(original, _ROOT_BEGIN, _ROOT_END)
+        text, provider_inner = _strip_block(text, _PROVIDER_BEGIN, _PROVIDER_END)
+        # Any foreign content codex wedged inside our provider block (e.g. a
+        # `notify =` array or a `[projects."…"]` table moved by codex's own
+        # config rewriter) survives as orphaned text we re-attach below.
+        provider_orphans = _strip_provider_table_from(provider_inner)
+        # The root block should only ever contain the previous-marker comment
+        # plus `model_provider = "telos"`. Anything else is foreign and worth
+        # preserving for the same reason.
+        root_orphans = "".join(
+            line for line in root_inner.splitlines(keepends=True)
+            if not line.startswith(_PREV_PREFIX)
+            and line.strip() not in ("", 'model_provider = "telos"')
+        )
+
+        # Re-inject orphans into the outer text so they survive the rewrite.
+        orphan_text = root_orphans + provider_orphans
+        if orphan_text:
+            if text and not text.startswith("\n"):
+                text = orphan_text + ("\n" if not orphan_text.endswith("\n") else "") + text
+            else:
+                text = orphan_text + text
+
         prepared = _remove_top_level_model_provider(text)
         if root_block is None:
             previous = prepared.previous_model_provider
@@ -259,6 +341,13 @@ class CodexInstaller(AgentInstaller):
         # init codex` on a machine that lost ~/.telos/config.json self-heals.
         if auth_mode == "chatgpt":
             self._ensure_chatgpt_upstream(result)
+
+        if orphan_text:
+            result.notes.append(
+                "recovered foreign content from inside the TELOS managed region "
+                "(likely moved there by codex's own config rewriter); "
+                "re-emitting it outside the managed block."
+            )
 
         if new_text == original:
             result.already_installed = True
@@ -316,8 +405,22 @@ class CodexInstaller(AgentInstaller):
             return result
 
         previous = _extract_previous_model_provider(root_block)
-        text = _strip_block(original, _ROOT_BEGIN, _ROOT_END)
-        text = _strip_block(text, _PROVIDER_BEGIN, _PROVIDER_END)
+        text, root_inner = _strip_block(original, _ROOT_BEGIN, _ROOT_END)
+        text, provider_inner = _strip_block(text, _PROVIDER_BEGIN, _PROVIDER_END)
+        # Preserve any foreign content the same way install() does, so
+        # uninstall is non-destructive even if codex rewrote our block.
+        provider_orphans = _strip_provider_table_from(provider_inner)
+        root_orphans = "".join(
+            line for line in root_inner.splitlines(keepends=True)
+            if not line.startswith(_PREV_PREFIX)
+            and line.strip() not in ("", 'model_provider = "telos"')
+        )
+        orphan_text = root_orphans + provider_orphans
+        if orphan_text:
+            text = orphan_text + ("\n" if not orphan_text.endswith("\n") else "") + text.lstrip("\n")
+            result.notes.append(
+                "recovered foreign content from inside the TELOS managed region"
+            )
         if previous is not None:
             text = previous + "\n" + text.lstrip("\n")
             result.notes.append(f"restored {previous}")

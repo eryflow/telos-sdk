@@ -204,7 +204,21 @@ class HermesInstaller(AgentInstaller):
     def _read_config(self) -> dict[str, Any] | None:
         if not self._config_path.exists():
             return None
-        loaded = yaml.safe_load(self._config_path.read_text(encoding="utf-8"))
+        text = self._config_path.read_text(encoding="utf-8")
+        if not text.strip():
+            return None
+        try:
+            loaded = yaml.safe_load(text)
+        except yaml.YAMLError as e:
+            raise RuntimeError(
+                f"{self._config_path} is not valid YAML ({e}). "
+                f"Restore from {self._config_path.with_suffix(self._config_path.suffix + '.telos.bak')} "
+                f"or fix the file manually, then re-run `telos init`."
+            ) from e
+        # Non-mapping top-level (list, scalar, null) is treated as "no usable
+        # config" rather than an error — hermes itself rejects those files, so
+        # there's nothing for us to patch and a clear note is more useful than
+        # raising.
         return loaded if isinstance(loaded, dict) else None
 
     def _auth_json_path(self) -> Path:

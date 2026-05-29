@@ -256,3 +256,58 @@ def test_install_no_primary_provider(tmp_path: Path) -> None:
         )
     finally:
         _restore_env()
+
+
+def test_install_corrupted_json_gives_clear_error(tmp_path: Path) -> None:
+    """A corrupted openclaw.json must not propagate a raw JSONDecodeError —
+    the user needs to know which file to fix and where the backup is."""
+    config_path = tmp_path / "openclaw.json"
+    config_path.write_text("{ this is not valid json", encoding="utf-8")
+    os.environ["TELOS_HOME"] = str(tmp_path / "telos-home")
+    try:
+        inst = OpenClawInstaller(
+            config_path=config_path,
+            state_path=tmp_path / "state.json",
+        )
+        with pytest.raises(RuntimeError) as excinfo:
+            inst.install()
+        msg = str(excinfo.value)
+        assert "not valid JSON" in msg
+        assert str(config_path) in msg
+        assert ".telos.bak" in msg
+    finally:
+        _restore_env()
+
+
+def test_install_empty_config_treated_as_missing(tmp_path: Path) -> None:
+    """A zero-byte openclaw.json is "config doesn't exist yet", not a crash."""
+    config_path = tmp_path / "openclaw.json"
+    config_path.write_text("", encoding="utf-8")
+    os.environ["TELOS_HOME"] = str(tmp_path / "telos-home")
+    try:
+        inst = OpenClawInstaller(
+            config_path=config_path,
+            state_path=tmp_path / "state.json",
+        )
+        r = inst.install()
+        assert not r.changed_files
+        assert any("does not exist" in n or "openclaw setup" in n for n in r.notes)
+    finally:
+        _restore_env()
+
+
+def test_install_non_object_top_level_gives_clear_error(tmp_path: Path) -> None:
+    """A valid-JSON but non-object top level (someone wrote a list) errors clearly."""
+    config_path = tmp_path / "openclaw.json"
+    config_path.write_text("[1, 2, 3]", encoding="utf-8")
+    os.environ["TELOS_HOME"] = str(tmp_path / "telos-home")
+    try:
+        inst = OpenClawInstaller(
+            config_path=config_path,
+            state_path=tmp_path / "state.json",
+        )
+        with pytest.raises(RuntimeError) as excinfo:
+            inst.install()
+        assert "JSON object" in str(excinfo.value)
+    finally:
+        _restore_env()
