@@ -53,8 +53,11 @@
 #### ❶ &nbsp;安装
 
 ```bash
-pip install -U telos-sdk
+# Linux / macOS / WSL2 / Android (Termux)
+curl -fsSL https://raw.githubusercontent.com/learningCatHD/telos-sdk/main/scripts/install.sh | bash
 ```
+
+<sub>更喜欢 pip？&nbsp;`pip install -U telos-sdk`</sub>
 
 #### ❷ &nbsp;连接
 
@@ -223,3 +226,8 @@ Core contributors: Zheng Wang, Shenzhi Wang, Yue Wu, Shiji Song, Gao Huang
   year         = {2026}
 }
 ```
+
+---
+
+<div align="center">
+<a href="https://github.com/learningCatHD/telos-sdk"><img src="https://img.shields.io/badge/⭐%20Star%20on%20GitHub-learningCatHD%2Ftelos--sdk-1F4A50?style=for-the-badge&logo=github&logoColor=white" alt="Star on GitHub"/></a>

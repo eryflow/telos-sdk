@@ -53,8 +53,11 @@ Scale to 1,000 sessions: **$362 → $26**. In a controlled A/B/C/D run (`showcas
 #### ❶ &nbsp;Install
 
 ```bash
-pip install -U telos-sdk
+# Linux / macOS / WSL2 / Android (Termux)
+curl -fsSL https://raw.githubusercontent.com/learningCatHD/telos-sdk/main/scripts/install.sh | bash
 ```
+
+<sub>Prefer pip? &nbsp;`pip install -U telos-sdk`</sub>
 
 #### ❷ &nbsp;Connect
 
