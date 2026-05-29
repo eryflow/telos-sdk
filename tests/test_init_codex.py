@@ -210,6 +210,80 @@ def test_uninstall_chatgpt_mode_removes_telos_upstream(tmp_path: Path) -> None:
     print("✓ test_uninstall_chatgpt_mode_removes_telos_upstream")
 
 
+def test_install_tolerates_missing_trailing_newline(tmp_path: Path) -> None:
+    """Repro for the real-world case where codex's own config rewriter drops
+    the final ``\\n``. Before the fix this raised ``"found a TELOS managed
+    Codex block without its end marker"`` and silently no-op'd the install."""
+    config = tmp_path / "config.toml"
+    body = (
+        "# >>> telos managed codex root\n"
+        "# telos_previous_model_provider = <absent>\n"
+        'model_provider = "telos"\n'
+        "# <<< telos managed codex root\n"
+        "\n"
+        "# >>> telos managed codex provider\n"
+        "[model_providers.telos]\n"
+        'name = "TELOS Gateway"\n'
+        'base_url = "http://127.0.0.1:7171/upstreams/openai/v1"\n'
+        'wire_api = "responses"\n'
+        "requires_openai_auth = true\n"
+        "# <<< telos managed codex provider"  # no trailing newline!
+    )
+    config.write_text(body)
+    inst = CodexInstaller(proxy_url="http://127.0.0.1:7171", config_path=config)
+    r = inst.install()
+    assert r.changed_files or r.already_installed, r.notes
+    text = config.read_text()
+    assert "model_provider = \"telos\"" in text
+    assert text.endswith("\n"), repr(text[-5:])
+    print("✓ test_install_tolerates_missing_trailing_newline")
+
+
+def test_install_preserves_foreign_content_inside_provider_block(tmp_path: Path) -> None:
+    """When codex moves unrelated TOML (notify, [projects.…], mcp servers)
+    inside our managed region — observed in the wild after codex's UI
+    rewrites the file — the next ``telos init`` must not delete it."""
+    config = tmp_path / "config.toml"
+    body = (
+        "# >>> telos managed codex root\n"
+        "# telos_previous_model_provider = <absent>\n"
+        'model_provider = "telos"\n'
+        "# <<< telos managed codex root\n"
+        "\n"
+        "# >>> telos managed codex provider\n"
+        'notify = ["/path/to/notifier", "turn-ended"]\n'
+        "\n"
+        "[model_providers.telos]\n"
+        'name = "TELOS Gateway"\n'
+        'base_url = "http://127.0.0.1:7171/upstreams/openai/v1"\n'
+        'wire_api = "responses"\n'
+        "requires_openai_auth = true\n"
+        "\n"
+        '[projects."/Users/me/repo"]\n'
+        'trust_level = "trusted"\n'
+        "# <<< telos managed codex provider\n"
+    )
+    config.write_text(body)
+    inst = CodexInstaller(proxy_url="http://127.0.0.1:7171", config_path=config)
+    r = inst.install()
+    text = config.read_text()
+    # foreign content survives
+    assert "notify =" in text, text
+    assert '[projects."/Users/me/repo"]' in text, text
+    assert 'trust_level = "trusted"' in text, text
+    # telos provider table is still there
+    assert "[model_providers.telos]" in text, text
+    assert "/upstreams/openai/v1" in text, text
+    # the foreign content is OUTSIDE the managed region after rewrite
+    provider_begin = text.index("# >>> telos managed codex provider")
+    provider_end = text.index("# <<< telos managed codex provider")
+    block = text[provider_begin:provider_end]
+    assert "notify =" not in block, block
+    assert '[projects."/Users/me/repo"]' not in block, block
+    assert any("foreign content" in n for n in r.notes), r.notes
+    print("✓ test_install_preserves_foreign_content_inside_provider_block")
+
+
 def main() -> None:
     test_codex_installer_registered()
     test_detect_auth_mode_with_tmp()

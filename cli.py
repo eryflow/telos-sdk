@@ -22,11 +22,23 @@ import webbrowser
 from telos.harnesses import HARNESS_NAMES
 
 
+def _resolve_version() -> str:
+    from importlib.metadata import PackageNotFoundError, version
+    try:
+        return version("telos-sdk")
+    except PackageNotFoundError:
+        return "unknown"
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
 
     if argv and argv[0] in ("-h", "--help"):
         _print_usage()
+        return 0
+
+    if argv and argv[0] in ("-V", "--version", "version"):
+        print(f"telos {_resolve_version()}")
         return 0
 
     if not argv:
@@ -426,6 +438,10 @@ def _print_usage() -> None:
         "  alias       set the harness the bare telos enters by default\n"
         "  replay      replay a recorded session across multiple modes for a controlled A/B comparison\n"
         "  showcase    offline narrated demo + interactive playground (--interactive / --cast)\n"
+        "\n"
+        "options:\n"
+        "  -V, --version   print the installed telos version and exit\n"
+        "  -h, --help      show this help and exit\n"
         "\n"
         "examples:\n"
         "  telos init\n"

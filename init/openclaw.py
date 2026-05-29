@@ -171,7 +171,23 @@ class OpenClawInstaller(AgentInstaller):
     def _read_config(self) -> dict[str, Any] | None:
         if not self._config_path.exists():
             return None
-        return json.loads(self._config_path.read_text(encoding="utf-8"))
+        text = self._config_path.read_text(encoding="utf-8")
+        if not text.strip():
+            return None
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(
+                f"{self._config_path} is not valid JSON ({e}). "
+                f"Restore from {self._config_path.with_suffix(self._config_path.suffix + '.telos.bak')} "
+                f"or fix the file manually, then re-run `telos init`."
+            ) from e
+        if not isinstance(data, dict):
+            raise RuntimeError(
+                f"{self._config_path} top level must be a JSON object, "
+                f"but is actually {type(data).__name__}."
+            )
+        return data
 
     def _telos_route_url(self, slug: str) -> str:
         return f"{self.proxy_url.rstrip('/')}/upstreams/{slug}"
