@@ -128,15 +128,31 @@ else
   done
 fi
 
+# Whether $TELOS_BIN's directory is already on the caller's PATH.
+# Note: even if it is, the *currently-running* interactive shell may have a
+# stale command hash (zsh/bash cache "telos: not found" once and don't recheck
+# until rehash). We always print a "if `telos` still says not found, run …" hint.
+BIN_DIR=""
+ON_PATH=0
+if [ -n "$TELOS_BIN" ]; then
+  BIN_DIR=$(dirname "$TELOS_BIN")
+  case ":$PATH:" in
+    *":$BIN_DIR:"*) ON_PATH=1 ;;
+  esac
+fi
+
 if [ -z "$TELOS_BIN" ]; then
   warn "installed, but the 'telos' command isn't on PATH yet. Try opening a new shell."
-elif ! command -v telos >/dev/null 2>&1; then
-  BIN_DIR=$(dirname "$TELOS_BIN")
-  warn "installed at $TELOS_BIN — add this to your PATH:"
+elif [ "$ON_PATH" -eq 0 ]; then
+  warn "installed at $TELOS_BIN — but $BIN_DIR is not on PATH. Add this to your shell rc:"
   printf '    %sexport PATH="%s:$PATH"%s\n' "$DIM" "$BIN_DIR" "$RST" >&2
 fi
 
-log "${GRN}installed${RST} $(${TELOS_BIN:-telos} --version 2>/dev/null || echo "$PKG")"
+log "${GRN}installed${RST} $("${TELOS_BIN:-telos}" --version 2>/dev/null || echo "$PKG")"
+
+if [ -n "$TELOS_BIN" ] && [ "$ON_PATH" -eq 1 ]; then
+  log "${DIM}if your current shell still says 'telos: command not found', run:${RST} hash -r   ${DIM}(zsh/bash) or open a new terminal${RST}"
+fi
 
 if [ "${TELOS_NO_INIT:-0}" = "1" ]; then
   log "skipping 'telos init' (TELOS_NO_INIT=1)"
