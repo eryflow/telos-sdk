@@ -5,6 +5,7 @@ Subcommands:
 - ``telos``               bare command → pick a harness and enter its CLI
 - ``telos <harness>``     directly enter a harness (claude-code / codex / openclaw / hermes)
 - ``telos init``          auto-detect harnesses → inject → start gateway in background → print dashboard
+- ``telos uninstall``     undo the injection from ``telos init`` (per-harness with ``--harness``)
 - ``telos gateway``       start / stop / view the gateway
 - ``telos dashboard``     open the dashboard in a browser (``restart`` cycles the gateway serving it)
 - ``telos mode``          switch the optimization mode (hot-updates the running gateway)
@@ -56,6 +57,9 @@ def main(argv: list[str] | None = None) -> int:
     if subcommand == "init":
         from telos.init.__main__ import main as init_main
         return init_main(rest)
+    if subcommand == "uninstall":
+        from telos.init.__main__ import uninstall_main
+        return uninstall_main(rest)
     if subcommand == "dashboard":
         return _cmd_dashboard(rest)
     if subcommand == "mode":
@@ -432,6 +436,7 @@ def _print_usage() -> None:
         "subcommands:\n"
         "  <harness>   directly enter a harness (claude-code / codex / openclaw / hermes)\n"
         "  init        auto-detect harnesses, inject config, start the gateway\n"
+        "  uninstall   undo the injection from 'init' (all harnesses, or one via --harness)\n"
         "  gateway     start / stop / view the gateway (start|stop|status|restart)\n"
         "  dashboard   open the saved-token / saved-$ dashboard in a browser (dashboard restart restarts it; dashboard reset zeroes it)\n"
         "  mode        switch the optimization mode (none|telos|rtk|both), hot-updates the running gateway\n"
@@ -445,6 +450,7 @@ def _print_usage() -> None:
         "\n"
         "examples:\n"
         "  telos init\n"
+        "  telos uninstall\n"
         "  telos gateway start --port 7171\n"
         "  telos mode both\n"
         "  telos alias claude-code\n"

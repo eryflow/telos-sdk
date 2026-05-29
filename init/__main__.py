@@ -8,8 +8,9 @@ Default (no arguments) flow —— this is the headline feature:
 3. Start the gateway in the background;
 4. Print the gateway and dashboard addresses.
 
-Single-point operations are also supported: ``--harness <name>``,
-``--uninstall``, ``--status``.
+Single-point operations are also supported: ``--harness <name>`` and
+``--status``. To undo the injection, use the top-level ``telos uninstall``
+command (which lives in :mod:`telos.cli`).
 """
 
 from __future__ import annotations
@@ -124,7 +125,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--gateway-url", "--proxy-url", dest="gateway_url",
                         default=None,
                         help="gateway address (default: running daemon if any, else ~/.telos/config.json)")
-    parser.add_argument("--uninstall", action="store_true", help="undo the injection")
     parser.add_argument("--status", action="store_true", help="view only, do not change files")
     parser.add_argument("--no-gateway", action="store_true",
                         help="only inject config, do not auto-start the gateway")
@@ -138,8 +138,8 @@ def main(argv: list[str] | None = None) -> int:
     # ---- Determine the target harness list ----
     if args.harness:
         targets = [args.harness]
-    elif args.status or args.uninstall:
-        # When unspecified, status/uninstall apply to all known harnesses.
+    elif args.status:
+        # When unspecified, status applies to all known harnesses.
         targets = [n for n in HARNESS_NAMES if n in INSTALLERS]
     else:
         detected = detect_installed(cfg.harness_executables)
@@ -157,16 +157,44 @@ def main(argv: list[str] | None = None) -> int:
     telos_config_path = config_path()
     config_changed = False
     for name in targets:
-        sub_rc, result = _run_one(name, gateway_url, uninstall=args.uninstall,
+        sub_rc, result = _run_one(name, gateway_url, uninstall=False,
                                   status=args.status)
         rc |= sub_rc
         if result is not None and telos_config_path in result.changed_files:
             config_changed = True
 
     # ---- Start the gateway after a successful install ----
-    if not args.uninstall and not args.status and not args.no_gateway and rc == 0:
+    if not args.status and not args.no_gateway and rc == 0:
         _start_gateway(config_changed=config_changed)
 
+    return rc
+
+
+def uninstall_main(argv: list[str] | None = None) -> int:
+    """``telos uninstall`` entry point — undo the gateway config injection.
+
+    By default applies to every known harness so a single command restores the
+    pre-``telos init`` state. Pass ``--harness <name>`` to scope to one.
+    """
+    parser = argparse.ArgumentParser(
+        prog="telos uninstall",
+        description="Undo the gateway config injection for each detected harness.",
+    )
+    parser.add_argument("--harness", "--agent", dest="harness", default=None,
+                        choices=sorted(INSTALLERS.keys()),
+                        help="operate only on the specified harness (default: apply to all known harnesses)")
+    args = parser.parse_args(argv)
+
+    if args.harness:
+        targets = [args.harness]
+    else:
+        targets = [n for n in HARNESS_NAMES if n in INSTALLERS]
+
+    rc = 0
+    for name in targets:
+        # gateway URL is irrelevant for uninstall; pass an empty placeholder.
+        sub_rc, _ = _run_one(name, "", uninstall=True, status=False)
+        rc |= sub_rc
     return rc
 
 
