@@ -31,3 +31,4 @@ showcase/demo.cast
 promo-assets/
 宣传稿.md
 .vercel
+dist-from-docker/
