@@ -198,7 +198,7 @@ Afterward any process that starts Claude Code automatically uses the local gatew
 To undo / check status:
 
 ```bash
-telos init --harness claude-code --uninstall   # restore the state before install
+telos uninstall --harness claude-code         # restore the state before install
 telos init --harness claude-code --status      # view only, don't modify files
 ```
 
@@ -226,9 +226,13 @@ telos init [options]
   --harness {claude-code,codex,openclaw,hermes,generic}
                        operate on the specified harness only (default: auto-detect all)
   --gateway-url URL    gateway address (default taken from ~/.telos/config.json)
-  --uninstall          restore the state before install
   --status             view only, don't modify files
   --no-gateway         only inject config, don't start the gateway automatically
+
+telos uninstall [options]
+  --harness {claude-code,codex,openclaw,hermes,generic}
+                       restore the pre-install state for a single harness
+                       (default: apply to every known harness)
 
 telos gateway [start|stop|status|restart] [options]
   --host HOST          listen address (default 127.0.0.1)

@@ -216,13 +216,13 @@ Turn "save money" from an abstract number into a "I can install this right now" 
 | 2:00 | Left: `claude` starts a coding task (pre-recorded or live) | "Usage is completely unchanged." |
 | 3:00 | Right: `jq -c '{call: .call_index, cache_read: .normalized.cache_read}' < ~/.telos/usage.jsonl` | "Watch cache_read climb line by line. From the 4th turn on, each turn hits 6000+ tokens." |
 | 4:00 | Browser opens `http://127.0.0.1:7171/__telos/dashboard` | "Live dashboard — PIN/FOLD/DROP distribution at a glance." |
-| 4:40 | `telos init --agent claude-code --uninstall` | "Can be cleanly uninstalled at any time, restoring the pre-install state exactly." |
+| 4:40 | `telos uninstall --harness claude-code` | "Can be cleanly uninstalled at any time, restoring the pre-install state exactly." |
 
 ### 5.4 Key Numbers (visible on stage)
 
 - **Integration time**: ≤ 60 seconds (1 init command)
 - **Footprint**: only the `env` field of `~/.claude/settings.json`
-- **Reversibility**: `--uninstall` restores exactly
+- **Reversibility**: `telos uninstall` restores exactly
 
 ### 5.5 Risks & Fallbacks
 

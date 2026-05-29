@@ -265,7 +265,7 @@ claude
 Undo / check status:
 
 ```bash
-telos init --agent claude-code --uninstall   # precisely restore the pre-install state
+telos uninstall --harness claude-code        # precisely restore the pre-install state
 telos init --agent claude-code --status
 ```
 

@@ -5,7 +5,7 @@
 # Reverses `install.sh`:
 #   1. Stops the local gateway daemon          (telos gateway stop)
 #   2. Undoes claude-code / codex / openclaw / hermes injections
-#                                              (telos init --uninstall)
+#                                              (telos uninstall)
 #   3. Uninstalls the Python package           (pipx / pip)
 #   4. Optionally removes ~/.telos/ state
 #
@@ -57,7 +57,7 @@ fi
 # 2) undo harness injections (claude-code / codex / openclaw / hermes)
 if [ -n "$TELOS_BIN" ]; then
   log "undoing harness injections"
-  "$TELOS_BIN" init --uninstall || warn "'telos init --uninstall' returned non-zero; some harnesses may need manual cleanup"
+  "$TELOS_BIN" uninstall || warn "'telos uninstall' returned non-zero; some harnesses may need manual cleanup"
 else
   warn "'telos' command not found — skipping harness uninstall"
 fi
