@@ -13,6 +13,7 @@ import urllib.request
 
 _CONTROL_PATH = "/__telos/control/mode"
 _RESET_PATH = "/__telos/control/reset"
+_DEVELOPER_PATH = "/__telos/developer.json"
 _TIMEOUT_S = 3.0
 
 
@@ -30,6 +31,27 @@ def get_mode(host: str, port: int) -> str:
     with urllib.request.urlopen(req, timeout=_TIMEOUT_S) as resp:  # noqa: S310
         data = json.loads(resp.read().decode("utf-8"))
     return str(data.get("mode", ""))
+
+
+def get_developer_summary(host: str, port: int) -> dict:
+    """Read a running gateway's live session summary (``/__telos/developer.json``).
+
+    Returns the parsed JSON (``session_count`` + per-session ``calls`` / ``harness``
+    / ``model``). Raises ``RuntimeError`` on failure so callers can degrade to a
+    "no live data" message rather than crash.
+    """
+    req = urllib.request.Request(
+        f"http://{host}:{port}{_DEVELOPER_PATH}", method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=_TIMEOUT_S) as resp:  # noqa: S310
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "replace")
+        raise RuntimeError(f"gateway returned HTTP {e.code}: {detail}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"cannot connect to gateway: {e.reason}") from e
+    except (OSError, json.JSONDecodeError) as e:
+        raise RuntimeError(f"cannot read gateway developer summary: {e}") from e
 
 
 def post_mode(host: str, port: int, label: str) -> str:

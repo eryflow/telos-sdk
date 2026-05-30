@@ -8,6 +8,7 @@ Subcommands:
 - ``telos uninstall``     undo the injection from ``telos init`` (per-harness with ``--harness``; ``--purge`` fully removes telos)
 - ``telos gateway``       start / stop / view the gateway
 - ``telos dashboard``     open the dashboard in a browser (``restart`` cycles the gateway serving it)
+- ``telos status``        one-shot overview: harness injection + gateway + traffic forwarding
 - ``telos mode``          switch the optimization mode (hot-updates the running gateway)
 - ``telos alias``         set the harness the bare ``telos`` enters by default
 - ``telos replay``        replay a recorded session across multiple modes for comparison
@@ -62,6 +63,8 @@ def main(argv: list[str] | None = None) -> int:
         return uninstall_main(rest)
     if subcommand == "dashboard":
         return _cmd_dashboard(rest)
+    if subcommand == "status":
+        return _cmd_status(rest)
     if subcommand == "mode":
         return _cmd_mode(rest)
     if subcommand == "alias":
@@ -346,6 +349,187 @@ def _reset_usage_log_file(cfg, *, hard: bool, restart_hint: bool) -> int:
 
 
 # ---------------------------------------------------------------------------
+# telos status
+# ---------------------------------------------------------------------------
+
+def _gather_status() -> dict:
+    """Collect a single snapshot of harness injection, the gateway, and traffic
+    forwarding. Pure data gathering — no printing — so it can back both the
+    human-readable view and ``--json``.
+    """
+    import time
+
+    from telos.config import load_config
+    from telos.gateway import control, daemon
+    from telos.harnesses import HARNESS_NAMES, HARNESS_SPECS, executable_path
+    from telos.init import INSTALLERS
+
+    cfg = load_config()
+
+    # ---- gateway ----
+    state = daemon.read_state()
+    gateway: dict = {"running": state is not None}
+    if state is not None:
+        gateway.update({
+            "pid": state.pid,
+            "base_url": state.base_url(),
+            "mode": state.mode,
+            "uptime_s": round(time.time() - state.started_at),
+            "usage_log": state.usage_log or None,
+            "dashboard_url": state.dashboard_url(),
+        })
+        # The live mode can drift from the recorded boot mode after a hot-switch.
+        try:
+            gateway["mode_live"] = control.get_mode(state.host, state.port)
+        except Exception:  # noqa: BLE001 - best effort; fall back to recorded mode
+            gateway["mode_live"] = None
+    else:
+        gateway.update({
+            "base_url": cfg.gateway.base_url(),
+            "mode": cfg.mode,
+            "usage_log": str(cfg.gateway.resolved_usage_log()),
+        })
+
+    # ---- harnesses (injection) ----
+    harnesses: list[dict] = []
+    for name in HARNESS_NAMES:
+        spec = HARNESS_SPECS[name]
+        installed = executable_path(spec, cfg.harness_executables) is not None
+        entry: dict = {
+            "name": name,
+            "display_name": spec.display_name,
+            "env_var": spec.env_var,
+            "installed": installed,
+            "injected": False,
+            "notes": [],
+        }
+        if name in INSTALLERS:
+            try:
+                res = INSTALLERS[name](proxy_url="").status()
+                entry["injected"] = res.already_installed
+                entry["notes"] = list(res.notes)
+            except Exception as e:  # noqa: BLE001 - a broken config shouldn't break status
+                entry["notes"] = [f"status check failed: {e}"]
+        harnesses.append(entry)
+
+    # ---- traffic forwarding ----
+    upstreams = [
+        {
+            "slug": slug,
+            "url": u.url,
+            "engine": u.engine,
+            "protocol": u.protocol,
+            "via": u.via or None,
+        }
+        for slug, u in cfg.upstreams.items()
+    ]
+    traffic: dict = {"upstreams": upstreams}
+    if state is not None:
+        try:
+            summary = control.get_developer_summary(state.host, state.port)
+            sessions = summary.get("sessions", []) or []
+            by_harness: dict[str, int] = {}
+            total_calls = 0
+            for s in sessions:
+                h = s.get("harness") or "(unknown)"
+                calls = int(s.get("calls", 0) or 0)
+                by_harness[h] = by_harness.get(h, 0) + calls
+                total_calls += calls
+            traffic["live"] = {
+                "session_count": summary.get("session_count", len(sessions)),
+                "total_calls": total_calls,
+                "by_harness": by_harness,
+            }
+        except Exception as e:  # noqa: BLE001 - older gateways may lack the endpoint
+            traffic["live_error"] = str(e)
+
+    return {"gateway": gateway, "harnesses": harnesses, "traffic": traffic}
+
+
+def _render_status(snap: dict) -> str:
+    gw = snap["gateway"]
+    lines: list[str] = ["TELOS status", ""]
+
+    # ---- gateway ----
+    lines.append("gateway")
+    if gw["running"]:
+        mode = gw["mode"]
+        live = gw.get("mode_live")
+        mode_str = f"{live} (live)" if live and live != mode else mode
+        lines.append("  status     running")
+        lines.append(f"  pid        {gw['pid']}")
+        lines.append(f"  listen     {gw['base_url']}")
+        lines.append(f"  mode       {mode_str}")
+        lines.append(f"  uptime     {gw['uptime_s']}s")
+        lines.append(f"  usage log  {gw.get('usage_log') or '(none)'}")
+        lines.append(f"  dashboard  {gw['dashboard_url']}")
+    else:
+        lines.append("  status     not running  (start it with telos gateway start)")
+        lines.append(f"  listen     {gw['base_url']}  (config default)")
+        lines.append(f"  mode       {gw['mode']}  (config default)")
+        lines.append(f"  usage log  {gw.get('usage_log') or '(none)'}")
+    lines.append("")
+
+    # ---- harnesses ----
+    lines.append("harnesses (injection)")
+    for h in snap["harnesses"]:
+        if not h["installed"]:
+            state_str = "not installed"
+        elif h["injected"]:
+            state_str = "installed, injected ✓"
+        else:
+            state_str = "installed, not injected"
+        lines.append(f"  {h['name']:<12} {state_str}")
+        for note in h["notes"]:
+            lines.append(f"      ▸ {note}")
+    lines.append("")
+
+    # ---- traffic forwarding ----
+    lines.append("traffic forwarding")
+    lines.append("  upstreams (slug → url):")
+    for u in snap["traffic"]["upstreams"]:
+        via = f"  via={u['via']}" if u["via"] else ""
+        lines.append(
+            f"    {u['slug']:<12} {u['url']}  [{u['engine']}/{u['protocol']}]{via}")
+    live = snap["traffic"].get("live")
+    if live is not None:
+        lines.append(
+            f"  live: {live['session_count']} session(s), "
+            f"{live['total_calls']} call(s) forwarded")
+        if live["by_harness"]:
+            breakdown = ", ".join(
+                f"{h}: {n}" for h, n in sorted(
+                    live["by_harness"].items(), key=lambda kv: -kv[1]))
+            lines.append(f"        by harness: {breakdown}")
+    elif "live_error" in snap["traffic"]:
+        lines.append(f"  live: unavailable ({snap['traffic']['live_error']})")
+    else:
+        lines.append("  live: gateway not running — no live traffic")
+
+    return "\n".join(lines)
+
+
+def _cmd_status(rest: list[str]) -> int:
+    """``telos status [--json]`` — one-shot overview of harness injection, the
+    gateway daemon, and traffic forwarding (configured upstreams + live counts).
+    """
+    if rest and rest[0] not in ("--json", "-j"):
+        print(f"error: unknown status option {rest[0]!r}; expected --json",
+              file=sys.stderr)
+        return 2
+
+    snap = _gather_status()
+
+    if rest and rest[0] in ("--json", "-j"):
+        import json
+        print(json.dumps(snap, ensure_ascii=False, indent=2))
+        return 0
+
+    print(_render_status(snap))
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # telos mode
 # ---------------------------------------------------------------------------
 
@@ -439,6 +623,7 @@ def _print_usage() -> None:
         "  uninstall   undo the injection from 'init' (all harnesses, or one via --harness; --purge fully removes telos)\n"
         "  gateway     start / stop / view the gateway (start|stop|status|restart)\n"
         "  dashboard   open the saved-token / saved-$ dashboard in a browser (dashboard restart restarts it; dashboard reset zeroes it)\n"
+        "  status      one-shot overview of harness injection, the gateway, and traffic forwarding (--json for machine-readable)\n"
         "  mode        switch the optimization mode (none|telos|rtk|both), hot-updates the running gateway\n"
         "  alias       set the harness the bare telos enters by default\n"
         "  replay      replay a recorded session across multiple modes for a controlled A/B comparison\n"
@@ -458,6 +643,7 @@ def _print_usage() -> None:
         "  telos dashboard\n"
         "  telos dashboard restart\n"
         "  telos dashboard reset\n"
+        "  telos status\n"
     )
 
 

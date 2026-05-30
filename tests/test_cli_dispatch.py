@@ -83,6 +83,37 @@ def test_dashboard_rejects_bad_verb() -> None:
     print("✓ test_dashboard_rejects_bad_verb")
 
 
+def test_status_without_gateway() -> None:
+    _iso_home()
+    rc, out = _run(["status"])
+    assert rc == 0
+    # The three sections are always present, even with no gateway running.
+    assert "gateway" in out
+    assert "harnesses (injection)" in out
+    assert "traffic forwarding" in out
+    assert "not running" in out
+    print("✓ test_status_without_gateway")
+
+
+def test_status_json_is_parseable() -> None:
+    _iso_home()
+    rc, out = _run(["status", "--json"])
+    assert rc == 0
+    snap = json.loads(out)
+    assert set(snap) == {"gateway", "harnesses", "traffic"}
+    assert snap["gateway"]["running"] is False
+    assert isinstance(snap["traffic"]["upstreams"], list)
+    print("✓ test_status_json_is_parseable")
+
+
+def test_status_rejects_bad_option() -> None:
+    _iso_home()
+    rc, out = _run(["status", "--bogus"])
+    assert rc == 2
+    assert "unknown status option" in out
+    print("✓ test_status_rejects_bad_option")
+
+
 def _run_uninstall(argv: list[str]) -> tuple[int, str]:
     """Run uninstall_main capturing output; argparse errors surface as rc=2."""
     buf = io.StringIO()
@@ -153,6 +184,9 @@ def main() -> None:
     test_mode_persists_without_gateway()
     test_mode_rejects_bad_label()
     test_dashboard_rejects_bad_verb()
+    test_status_without_gateway()
+    test_status_json_is_parseable()
+    test_status_rejects_bad_option()
     test_uninstall_unknown_harness_suggests()
     test_uninstall_skips_uninjected_harness()
     test_uninstall_reverts_injected_harness()
