@@ -16,6 +16,7 @@ command (which lives in :mod:`telos.cli`).
 from __future__ import annotations
 
 import argparse
+import difflib
 import shutil
 import subprocess
 import sys
@@ -44,6 +45,35 @@ def _render(result: InstallResult) -> str:
 def _make_installer(name: str, gateway_url: str):
     factory = INSTALLERS[name]
     return factory(proxy_url=gateway_url)
+
+
+def _harness_arg(value: str) -> str:
+    """argparse ``type`` for ``--harness``: validate against :data:`INSTALLERS`,
+    with a "did you mean" hint instead of a bare ``invalid choice``.
+
+    Used in place of ``choices=`` so a near miss like ``claude`` (or ``claude code``,
+    which the shell splits into two args) yields ``Did you mean 'claude-code'?``
+    rather than an opaque error.
+    """
+    if value in INSTALLERS:
+        return value
+    suggestion = difflib.get_close_matches(value, INSTALLERS.keys(), n=1)
+    hint = f" Did you mean {suggestion[0]!r}?" if suggestion else ""
+    raise argparse.ArgumentTypeError(
+        f"unknown harness {value!r}.{hint} Options: {', '.join(sorted(INSTALLERS))}"
+    )
+
+
+def _is_injected(name: str) -> bool:
+    """Whether telos currently has its gateway redirect injected for ``name``.
+
+    On error (e.g. a malformed config file) returns ``True`` so the uninstall step
+    still runs and surfaces the underlying error rather than silently skipping it.
+    """
+    try:
+        return _make_installer(name, "").status().already_installed
+    except Exception:  # noqa: BLE001 - a broken config shouldn't hide the harness
+        return True
 
 
 def _run_one(name: str, gateway_url: str, *, uninstall: bool, status: bool) -> tuple[int, InstallResult | None]:
@@ -122,8 +152,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     # --harness is primary; --agent is a hidden alias for backward compatibility.
     parser.add_argument("--harness", "--agent", dest="harness", default=None,
-                        choices=sorted(INSTALLERS.keys()),
-                        help="operate only on the specified harness (default: auto-detect all)")
+                        type=_harness_arg, metavar="NAME",
+                        help="operate only on the specified harness "
+                             f"({', '.join(sorted(INSTALLERS))}); default: auto-detect all")
     parser.add_argument("--gateway-url", "--proxy-url", dest="gateway_url",
                         default=None,
                         help="gateway address (default: running daemon if any, else ~/.telos/config.json)")
@@ -223,8 +254,9 @@ def _pip_uninstall_self() -> None:
 def uninstall_main(argv: list[str] | None = None) -> int:
     """``telos uninstall`` entry point — undo the gateway config injection.
 
-    By default applies to every known harness so a single command restores the
-    pre-``telos init`` state. Pass ``--harness <name>`` to scope to one.
+    By default it reverts every harness telos has actually injected (harnesses
+    that were never connected are skipped), restoring the pre-``telos init`` state.
+    Pass ``--harness <name>`` to scope to one.
 
     With ``--purge`` it goes further and fully removes telos: after reverting the
     harness configs it stops the gateway daemon, deletes ``~/.telos`` and
@@ -235,26 +267,28 @@ def uninstall_main(argv: list[str] | None = None) -> int:
         description="Undo the gateway config injection for each detected harness.",
     )
     parser.add_argument("--harness", "--agent", dest="harness", default=None,
-                        choices=sorted(INSTALLERS.keys()),
-                        help="operate only on the specified harness (default: apply to all known harnesses)")
+                        type=_harness_arg, metavar="NAME",
+                        help="operate only on the specified harness "
+                             f"({', '.join(sorted(INSTALLERS))}); default: every injected harness")
     parser.add_argument("--purge", action="store_true",
                         help="fully remove telos: also stop the gateway, delete ~/.telos and uninstall the telos-sdk package")
     parser.add_argument("-y", "--yes", dest="assume_yes", action="store_true",
                         help="skip the confirmation prompt for --purge")
     args = parser.parse_args(argv)
 
+    if args.purge and args.harness:
+        print("--purge applies to the whole installation; ignoring --harness.",
+              file=sys.stderr)
+        args.harness = None
+
     if args.harness:
-        targets = [args.harness]
+        requested = [args.harness]
     else:
-        targets = [n for n in HARNESS_NAMES if n in INSTALLERS]
+        requested = [n for n in HARNESS_NAMES if n in INSTALLERS]
 
     # --purge is destructive (deletes ~/.telos and uninstalls the package).
-    # It implies all harnesses, and confirms before proceeding.
+    # Confirm before touching anything.
     if args.purge:
-        if args.harness:
-            print("--purge applies to the whole installation; ignoring --harness.",
-                  file=sys.stderr)
-            targets = [n for n in HARNESS_NAMES if n in INSTALLERS]
         from telos.cli_menu import confirm
         if not args.assume_yes and not confirm(
             "This will revert all harness configs, stop the gateway, delete "
@@ -264,11 +298,43 @@ def uninstall_main(argv: list[str] | None = None) -> int:
             print("aborted.")
             return 1
 
+    # Only revert harnesses telos has actually injected — uninstalling a harness
+    # that was never connected is a confusing no-op. 'generic' holds no state (it
+    # just prints advice), so it always runs when explicitly requested.
+    targets: list[str] = []
+    skipped: list[str] = []
+    for name in requested:
+        if name == "generic" or _is_injected(name):
+            targets.append(name)
+        else:
+            skipped.append(name)
+
+    for name in skipped:
+        print(f"  ▸ skip {name}: not connected to telos (no injection found)")
+
+    if not targets and not args.purge:
+        if args.harness:
+            print(f"{args.harness} is not currently connected to telos; nothing to undo.")
+        else:
+            print("No telos-injected harness found; nothing to undo.")
+        return 0
+
     rc = 0
+    reverted_any = False
     for name in targets:
         # gateway URL is irrelevant for uninstall; pass an empty placeholder.
-        sub_rc, _ = _run_one(name, "", uninstall=True, status=False)
+        sub_rc, result = _run_one(name, "", uninstall=True, status=False)
         rc |= sub_rc
+        if result is not None and result.changed_files:
+            reverted_any = True
+
+    if reverted_any:
+        print()
+        print(
+            "⚠ Restart any running harness session (e.g. Claude Code) for this to "
+            "take effect — the gateway redirect is read once at startup, so a process "
+            "started before uninstall stays connected until you relaunch it."
+        )
 
     if args.purge:
         print()

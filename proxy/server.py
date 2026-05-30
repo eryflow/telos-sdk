@@ -286,6 +286,30 @@ def _anthropic_error(status: int, err_type: str, message: str) -> web.Response:
     )
 
 
+def _openai_error(status: int, err_type: str, message: str) -> web.Response:
+    """OpenAI-shaped error envelope, for clients on the OpenAI wire (Codex's
+    ``wire_api = "responses"`` passthrough). Mirrors the ``{"error": {...}}``
+    body chatgpt.com / api.openai.com return so the client parses it natively.
+    """
+    return web.json_response(
+        {"error": {"message": message, "type": err_type, "code": err_type}},
+        status=status,
+    )
+
+
+def _looks_like_html(content_type: str, body: bytes) -> bool:
+    """True when a response body is an HTML page rather than JSON.
+
+    Checks the declared content-type first, then sniffs the leading bytes
+    (upstreams/CDNs sometimes mislabel HTML error pages as ``text/plain`` or
+    omit the header). Only the first non-whitespace bytes matter.
+    """
+    if "text/html" in content_type.lower():
+        return True
+    head = body[:512].lstrip().lower()
+    return head.startswith(b"<!doctype") or head.startswith(b"<html")
+
+
 # ---------------------------------------------------------------------------
 # Raw message summary (the developer page shows the conversation as it was before TELOS rewriting)
 # ---------------------------------------------------------------------------
@@ -1394,6 +1418,26 @@ class ProxyApp:
             body_bytes = await upstream.read()
         finally:
             upstream.release()
+
+        # Guard against relaying an HTML error page to a JSON client. When a
+        # request hits a path the upstream answers with HTML (e.g. Codex's
+        # login/bootstrap probing the bare base_url or ``/me`` while the
+        # ``model_provider = telos`` override is active, which chatgpt.com's
+        # codex backend answers with a 403 ``<!DOCTYPE html>`` page), the
+        # client does ``JSON.parse(html)`` and dies with
+        # ``Unexpected token '<', "<!DOCTYPE "... is not valid JSON``. Swap the
+        # HTML for a parseable JSON error so the client surfaces something
+        # actionable instead of crashing on the first byte.
+        if status >= 400 and _looks_like_html(ct, body_bytes):
+            return _openai_error(
+                status, "invalid_request_error",
+                f"Upstream returned an HTML page (status {status}) instead of "
+                f"JSON for {request.method} {tail!r}. This is usually an "
+                f"auth/login path that is not supported through the gateway — "
+                f"re-login with the telos provider removed "
+                f"(`telos uninstall --harness codex`, sign in, then "
+                f"`telos init codex`).",
+            )
         return web.Response(body=body_bytes, status=status,
                             headers={"Content-Type": ct})
 

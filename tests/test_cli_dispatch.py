@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import tempfile
 
 from telos import cli
+from telos.init.__main__ import uninstall_main
 
 
 def _iso_home() -> None:
@@ -81,6 +83,68 @@ def test_dashboard_rejects_bad_verb() -> None:
     print("✓ test_dashboard_rejects_bad_verb")
 
 
+def _run_uninstall(argv: list[str]) -> tuple[int, str]:
+    """Run uninstall_main capturing output; argparse errors surface as rc=2."""
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+        try:
+            rc = uninstall_main(argv)
+        except SystemExit as e:  # argparse error path
+            rc = e.code if isinstance(e.code, int) else 1
+    return rc, buf.getvalue()
+
+
+@contextlib.contextmanager
+def _isolated_claude_dir():
+    """Point CLAUDE_CONFIG_DIR at a fresh empty dir, restoring it afterwards."""
+    prev = os.environ.get("CLAUDE_CONFIG_DIR")
+    d = os.path.join(tempfile.mkdtemp(prefix="telos-undo-"), ".claude")
+    os.makedirs(d)
+    os.environ["CLAUDE_CONFIG_DIR"] = d
+    try:
+        yield d
+    finally:
+        if prev is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = prev
+
+
+def test_uninstall_unknown_harness_suggests() -> None:
+    # 'claude' (or the shell-split 'claude code') should hint at 'claude-code'.
+    rc, out = _run_uninstall(["--harness", "claude"])
+    assert rc == 2
+    assert "Did you mean 'claude-code'" in out
+    print("✓ test_uninstall_unknown_harness_suggests")
+
+
+def test_uninstall_skips_uninjected_harness() -> None:
+    _iso_home()
+    with _isolated_claude_dir():
+        rc, out = _run_uninstall(["--harness", "claude-code"])
+    assert rc == 0
+    assert "not currently connected" in out
+    assert "Restart any running harness" not in out  # nothing was reverted
+    print("✓ test_uninstall_skips_uninjected_harness")
+
+
+def test_uninstall_reverts_injected_harness() -> None:
+    _iso_home()
+    with _isolated_claude_dir() as d:
+        sp = os.path.join(d, "settings.json")
+        with open(sp, "w") as f:
+            json.dump({"env": {
+                "ANTHROPIC_BASE_URL": "http://127.0.0.1:7171/_h/claude-code",
+                "__telos_installed": True,
+            }}, f)
+        rc, out = _run_uninstall(["--harness", "claude-code"])
+        data = json.loads(open(sp).read())
+    assert rc == 0
+    assert "Restart any running harness" in out  # reminder shown after a real revert
+    assert "ANTHROPIC_BASE_URL" not in data.get("env", {})
+    print("✓ test_uninstall_reverts_injected_harness")
+
+
 def main() -> None:
     test_help_omits_proxy()
     test_unknown_subcommand()
@@ -89,6 +153,9 @@ def main() -> None:
     test_mode_persists_without_gateway()
     test_mode_rejects_bad_label()
     test_dashboard_rejects_bad_verb()
+    test_uninstall_unknown_harness_suggests()
+    test_uninstall_skips_uninjected_harness()
+    test_uninstall_reverts_injected_harness()
     print("\nall cli dispatch tests passed.")
 
 

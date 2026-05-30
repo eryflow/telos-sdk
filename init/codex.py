@@ -373,6 +373,15 @@ class CodexInstaller(AgentInstaller):
                 "detected ChatGPT login (auth.json auth_mode=chatgpt); "
                 "routing through chatgpt.com/backend-api/codex."
             )
+            result.notes.append(
+                "if your ChatGPT token later expires (Codex shows a "
+                "'token_invalidated' / 'sign in again' error), the re-login "
+                "MUST be done with the telos provider removed — the "
+                "'Sign in with ChatGPT' bootstrap probes non-API paths that, "
+                "routed through the gateway, return an HTML page and crash "
+                "Codex with \"Unexpected token '<', \"<!DOCTYPE\"...\". Workflow: "
+                "`telos uninstall --harness codex` → sign in → `telos init codex`."
+            )
         elif auth_mode == "unknown":
             result.notes.append(
                 "could not detect Codex auth mode (auth.json missing or unreadable); "
