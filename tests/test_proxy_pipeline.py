@@ -21,7 +21,7 @@ _OPENCLAW_REQ = {
     "stream": False,
 }
 
-_HERMES_REQ = {
+_CLAUDE_CODE_REQ = {
     "model": "claude-opus-4-7",
     "max_tokens": 1024,
     "system": [{"type": "text",
@@ -41,10 +41,10 @@ def test_pipeline_detects_openclaw() -> None:
     print("✓ test_pipeline_detects_openclaw")
 
 
-def test_pipeline_detects_hermes() -> None:
-    r = process_anthropic_request(_HERMES_REQ, session_id="t-h")
-    assert r.harness == "hermes"
-    print("✓ test_pipeline_detects_hermes")
+def test_pipeline_detects_claude_code() -> None:
+    r = process_anthropic_request(_CLAUDE_CODE_REQ, session_id="t-h")
+    assert r.harness == "claude-code"
+    print("✓ test_pipeline_detects_claude_code")
 
 
 def test_pipeline_injects_cache_control() -> None:
@@ -58,7 +58,7 @@ def test_pipeline_injects_cache_control() -> None:
 
 
 def test_pipeline_explicit_harness_override() -> None:
-    r = process_anthropic_request(_HERMES_REQ, session_id="t-ov",
+    r = process_anthropic_request(_CLAUDE_CODE_REQ, session_id="t-ov",
                                    harness_name="openclaw")
     assert r.harness == "openclaw", \
         "an explicit harness_name should override auto-detection"
@@ -77,7 +77,7 @@ def test_pipeline_passthrough_fields() -> None:
     print("✓ test_pipeline_passthrough_fields")
 
 
-def test_detect_hermes_marker_in_user_message() -> None:
+def test_detect_claude_code_marker_in_user_message() -> None:
     """Claude Code injects ``<system-reminder>`` into the user message rather than system.
 
     The old implementation scanned only the system segment and would misclassify such requests as openclaw.
@@ -93,12 +93,12 @@ def test_detect_hermes_marker_in_user_message() -> None:
             ]},
         ],
     }
-    assert _detect_harness(req) == "hermes"
-    print("✓ test_detect_hermes_marker_in_user_message")
+    assert _detect_harness(req) == "claude-code"
+    print("✓ test_detect_claude_code_marker_in_user_message")
 
 
-def test_detect_hermes_command_name_in_user_message() -> None:
-    """``<command-name>`` is also a Hermes envelope (the slash command panel)."""
+def test_detect_claude_code_command_name_in_user_message() -> None:
+    """``<command-name>`` is also a Claude Code envelope (the slash command panel)."""
     req = {
         "model": "claude-opus-4-7",
         "messages": [
@@ -107,11 +107,11 @@ def test_detect_hermes_command_name_in_user_message() -> None:
             ]},
         ],
     }
-    assert _detect_harness(req) == "hermes"
-    print("✓ test_detect_hermes_command_name_in_user_message")
+    assert _detect_harness(req) == "claude-code"
+    print("✓ test_detect_claude_code_command_name_in_user_message")
 
 
-def test_detect_hermes_via_tool_fingerprint() -> None:
+def test_detect_claude_code_via_tool_fingerprint() -> None:
     """On the first turn with no reminder and no thinking, Claude Code's tool set is also a strong fingerprint."""
     req = {
         "model": "claude-opus-4-7",
@@ -126,8 +126,8 @@ def test_detect_hermes_via_tool_fingerprint() -> None:
             {"role": "user", "content": [{"type": "text", "text": "Hi"}]},
         ],
     }
-    assert _detect_harness(req) == "hermes"
-    print("✓ test_detect_hermes_via_tool_fingerprint")
+    assert _detect_harness(req) == "claude-code"
+    print("✓ test_detect_claude_code_via_tool_fingerprint")
 
 
 def test_detect_openclaw_when_no_signals() -> None:
@@ -145,7 +145,7 @@ def test_detect_openclaw_when_no_signals() -> None:
 
 
 def test_detect_substring_no_false_positive() -> None:
-    """A bare ``<system-reminder>`` string without a closing tag should not trigger the hermes verdict."""
+    """A bare ``<system-reminder>`` string without a closing tag should not trigger the claude-code verdict."""
     req = {
         "model": "claude-opus-4-7",
         "messages": [
@@ -163,7 +163,7 @@ def test_sticky_harness_across_calls() -> None:
     """Under the same session_state, the first-turn detection result should be locked to avoid later flipping."""
     state = BridgeSessionState()
     # turn 1: a typical Claude Code request
-    hermes_req = {
+    cc_req = {
         "model": "claude-opus-4-7",
         "max_tokens": 1024,
         "system": [{"type": "text", "text": "Claude Code system."}],
@@ -174,12 +174,12 @@ def test_sticky_harness_across_calls() -> None:
             ]},
         ],
     }
-    r1 = process_anthropic_request(hermes_req, session_id="t-sticky",
+    r1 = process_anthropic_request(cc_req, session_id="t-sticky",
                                      session_state=state)
-    assert r1.harness == "hermes"
-    assert state.sticky_harness == "hermes"
+    assert r1.harness == "claude-code"
+    assert state.sticky_harness == "claude-code"
 
-    # turn 2: construct a request that bare detection would identify as openclaw (no hermes fingerprint at all)
+    # turn 2: construct a request that bare detection would identify as openclaw (no claude-code fingerprint at all)
     follow_up = {
         "model": "claude-opus-4-7",
         "max_tokens": 1024,
@@ -190,34 +190,34 @@ def test_sticky_harness_across_calls() -> None:
     }
     r2 = process_anthropic_request(follow_up, session_id="t-sticky",
                                      session_state=state)
-    # the session is already locked → it should still be hermes
-    assert r2.harness == "hermes", \
-        f"sticky_harness should keep subsequent calls on hermes, got {r2.harness}"
+    # the session is already locked → it should still be claude-code
+    assert r2.harness == "claude-code", \
+        f"sticky_harness should keep subsequent calls on claude-code, got {r2.harness}"
     print("✓ test_sticky_harness_across_calls")
 
 
 def test_explicit_harness_overrides_sticky() -> None:
     """An explicit harness_name must be able to override sticky_harness."""
-    state = BridgeSessionState(sticky_harness="hermes")
+    state = BridgeSessionState(sticky_harness="claude-code")
     req = dict(_OPENCLAW_REQ)
     r = process_anthropic_request(req, session_id="t-ov2",
                                     session_state=state,
                                     harness_name="openclaw")
     assert r.harness == "openclaw"
     # an explicit override does **not** rewrite sticky_harness (preserving the session's "natural" detection)
-    assert state.sticky_harness == "hermes"
+    assert state.sticky_harness == "claude-code"
     print("✓ test_explicit_harness_overrides_sticky")
 
 
 def main() -> None:
     test_pipeline_detects_openclaw()
-    test_pipeline_detects_hermes()
+    test_pipeline_detects_claude_code()
     test_pipeline_injects_cache_control()
     test_pipeline_explicit_harness_override()
     test_pipeline_passthrough_fields()
-    test_detect_hermes_marker_in_user_message()
-    test_detect_hermes_command_name_in_user_message()
-    test_detect_hermes_via_tool_fingerprint()
+    test_detect_claude_code_marker_in_user_message()
+    test_detect_claude_code_command_name_in_user_message()
+    test_detect_claude_code_via_tool_fingerprint()
     test_detect_openclaw_when_no_signals()
     test_detect_substring_no_false_positive()
     test_sticky_harness_across_calls()

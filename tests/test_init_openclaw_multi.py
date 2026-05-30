@@ -72,9 +72,9 @@ def test_install_patches_subset(tmp_path: Path) -> None:
         data = json.loads(config_path.read_text())
         # deepseek + openrouter patched.
         assert (data["models"]["providers"]["deepseek"]["baseUrl"]
-                == "http://127.0.0.1:7171/upstreams/deepseek")
+                == "http://127.0.0.1:7171/_h/openclaw/upstreams/deepseek")
         assert (data["models"]["providers"]["openrouter"]["baseUrl"]
-                == "http://127.0.0.1:7171/upstreams/openrouter")
+                == "http://127.0.0.1:7171/_h/openclaw/upstreams/openrouter")
         # anthropic untouched.
         assert (data["models"]["providers"]["anthropic"]["baseUrl"]
                 == "https://api.anthropic.com")
@@ -96,7 +96,7 @@ def test_install_all_providers(tmp_path: Path) -> None:
         data = json.loads(config_path.read_text())
         for pid in ("deepseek", "openrouter", "anthropic"):
             assert data["models"]["providers"][pid]["baseUrl"].startswith(
-                "http://127.0.0.1:7171/upstreams/"
+                "http://127.0.0.1:7171/_h/openclaw/upstreams/"
             )
         state = json.loads(state_path.read_text())
         assert len(state["patched"]) == 3
@@ -123,9 +123,9 @@ def test_incremental_install_merges_state(tmp_path: Path) -> None:
         data = json.loads(config_path.read_text())
         # Both patched.
         assert (data["models"]["providers"]["deepseek"]["baseUrl"]
-                == "http://127.0.0.1:7171/upstreams/deepseek")
+                == "http://127.0.0.1:7171/_h/openclaw/upstreams/deepseek")
         assert (data["models"]["providers"]["anthropic"]["baseUrl"]
-                == "http://127.0.0.1:7171/upstreams/anthropic")
+                == "http://127.0.0.1:7171/_h/openclaw/upstreams/anthropic")
         # State has both records.
         state = json.loads(state_path.read_text())
         ids = sorted(s["provider_id"] for s in state["patched"])
@@ -201,7 +201,7 @@ def test_state_v1_backward_compat(tmp_path: Path) -> None:
     # Pre-patch deepseek manually so it matches the state.
     data = json.loads(config_path.read_text())
     data["models"]["providers"]["deepseek"]["baseUrl"] = (
-        "http://127.0.0.1:7171/upstreams/deepseek"
+        "http://127.0.0.1:7171/_h/openclaw/upstreams/deepseek"
     )
     config_path.write_text(json.dumps(data, indent=2))
 
@@ -211,7 +211,7 @@ def test_state_v1_backward_compat(tmp_path: Path) -> None:
         "version": 1,
         "provider_id": "deepseek",
         "previous_base_url": "https://api.deepseek.com",
-        "gateway_route_url": "http://127.0.0.1:7171/upstreams/deepseek",
+        "gateway_route_url": "http://127.0.0.1:7171/_h/openclaw/upstreams/deepseek",
     }))
 
     os.environ["TELOS_HOME"] = str(tmp_path / "telos-home")
@@ -258,7 +258,7 @@ def test_repatch_after_daemon_port_change_preserves_original(tmp_path: Path) -> 
         # openclaw.json now has the 7171 route URL.
         data1 = json.loads(config_path.read_text())
         assert (data1["models"]["providers"]["deepseek"]["baseUrl"]
-                == "http://127.0.0.1:7171/upstreams/deepseek")
+                == "http://127.0.0.1:7171/_h/openclaw/upstreams/deepseek")
 
         # Daemon moves to 7392; same install runs again.
         inst_b = OpenClawInstaller(
@@ -272,13 +272,13 @@ def test_repatch_after_daemon_port_change_preserves_original(tmp_path: Path) -> 
         # openclaw.json now points at 7392 (re-aligned).
         data2 = json.loads(config_path.read_text())
         assert (data2["models"]["providers"]["deepseek"]["baseUrl"]
-                == "http://127.0.0.1:7392/upstreams/deepseek")
+                == "http://127.0.0.1:7392/_h/openclaw/upstreams/deepseek")
         # State STILL records the original upstream (not the 7171 stale route).
         state2 = json.loads(state_path.read_text())
         rec2 = next(r for r in state2["patched"]
                      if r["provider_id"] == "deepseek")
         assert rec2["previous_base_url"] == "https://api.deepseek.com"
-        assert rec2["gateway_route_url"] == "http://127.0.0.1:7392/upstreams/deepseek"
+        assert rec2["gateway_route_url"] == "http://127.0.0.1:7392/_h/openclaw/upstreams/deepseek"
 
         # And uninstall (with the 7392 installer) restores to the real upstream.
         inst_b.uninstall()

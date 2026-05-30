@@ -237,8 +237,8 @@ class CodexInstaller(AgentInstaller):
         """
         proxy = self.proxy_url.rstrip("/")
         if auth_mode == "chatgpt":
-            return f"{proxy}/upstreams/{_CHATGPT_SLUG}"
-        return f"{proxy}/upstreams/openai/v1"
+            return f"{proxy}/_h/codex/upstreams/{_CHATGPT_SLUG}"
+        return f"{proxy}/_h/codex/upstreams/openai/v1"
 
     def _ensure_chatgpt_upstream(self, result: InstallResult) -> None:
         """Register the ``codex-chatgpt`` slug in ``~/.telos/config.json`` so the

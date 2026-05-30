@@ -74,7 +74,7 @@ def test_install_patches_provider_baseurl(tmp_path: Path) -> None:
         assert config_path in r.changed_files
         data = json.loads(config_path.read_text())
         new_url = data["models"]["providers"]["deepseek"]["baseUrl"]
-        assert new_url == "http://127.0.0.1:7171/upstreams/deepseek"
+        assert new_url == "http://127.0.0.1:7171/_h/openclaw/upstreams/deepseek"
         # State file records the original (v2 list format).
         state = json.loads(state_path.read_text())
         assert state["version"] == 2

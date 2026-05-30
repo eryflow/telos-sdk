@@ -56,7 +56,6 @@ from telos.proxy.pipeline import (
     process_anthropic_request,
     process_openai_request,
 )
-from telos.registry import canonical_harness
 from telos.scripts.telos_anthropic_transport import _detect_harness_signal
 
 if TYPE_CHECKING:
@@ -64,6 +63,11 @@ if TYPE_CHECKING:
 
 
 _DEFAULT_UPSTREAM = "https://api.anthropic.com"
+
+# Harness tags accepted by the ``/_h/<harness>/`` URL prefix mechanism.
+# Installers emit these in the base_url they patch into the agent's config so
+# attribution is fixed at the source, no detection guess-work involved.
+_VALID_HARNESS_TAGS = frozenset({"claude-code", "hermes", "openclaw", "codex"})
 
 # Headers preserved when forwarding to upstream (auth / protocol version / Anthropic private beta).
 # Host / Content-Length are computed by aiohttp itself; do not pass them through from the client.
@@ -474,13 +478,25 @@ class ProxyApp:
                          raw: Mapping[str, Any]) -> str:
         """Decide which harness to use to parse this request.
 
-        Priority: explicit ``--harness`` override > a confident signal from this request >
-        this client's prior confident memory > fallback ``openclaw``. A confident signal
-        (HTTP headers / rich content) is pinned to ``self._client_harness`` for this
-        client's subsequent signal-less requests to inherit.
+        Priority:
+          1. URL tag stamped by ``handle_tagged_route`` (``/_h/<harness>/``)
+             — the authoritative source for installs from 2026-05+. Bypasses
+             all detection.
+          2. Explicit ``--harness`` override (proxy CLI flag or upstream ``via``
+             temporarily injected by the slug route).
+          3. A confident signal from this request (header / envelope tags /
+             thinking block / tool fingerprint). Pinned to per-client memory.
+          4. This client's prior confident memory.
+          5. Fallback ``openclaw`` (Anthropic-compatible catch-all).
+
+        Steps 3-5 are legacy fallback for un-tagged installs; in a fully
+        migrated fleet only step 1 fires.
         """
+        tag = request.get("_telos_harness_tag")
+        if tag:
+            return tag
         if self.harness_override:
-            return canonical_harness(self.harness_override)
+            return self.harness_override
         client = _client_identity(request.headers)
         signal = _detect_harness_signal(raw, request.headers)
         if signal is not None:
@@ -743,6 +759,14 @@ class ProxyApp:
                 _log.warning(
                     "tool_result-order issue not introduced by TELOS "
                     "(call=%d) — forwarding request as-is", call_index)
+
+        # Attribution overlay: keep the dashboard's "breakdown by harness"
+        # pointed at the *calling agent* (hermes / openclaw / …) even when the
+        # optimization layer degraded to passthrough or rtk-only. Mode info
+        # lives in result.mode; this field is the caller identity. Mirrors the
+        # overlay in _handle_openai_chat / _handle_openai_responses.
+        if result.harness in ("passthrough", "rtk-only"):
+            result.harness = self._resolve_harness(request, raw)
 
         is_streaming = bool(raw.get("stream", False))
         url = f"{self.upstream}/v1/messages"
@@ -1204,10 +1228,64 @@ class ProxyApp:
         return web.Response(body=body_bytes, status=status, headers={"Content-Type": ct})
 
     # ------------------------------------------------------------------
+    # /_h/{harness}/{tail:.*}  -- URL-tagged route (attribution at injection time)
+    # ------------------------------------------------------------------
+
+    async def handle_tagged_route(self, request: web.Request) -> web.StreamResponse:
+        """Strip the ``/_h/<harness>/`` URL tag, stamp it on the request, dispatch.
+
+        Installers prepend ``/_h/<harness>/`` to the agent's base_url so the
+        proxy gets the calling agent's identity directly from the URL rather
+        than guessing via headers/content/sticky-memory. This handler peels
+        the prefix and forwards the underlying request to the normal handler
+        (``handle_messages`` for ``v1/messages``, ``handle_upstream_route``
+        for ``upstreams/<slug>/<...>``).
+
+        Downstream handlers read ``request["_telos_harness_tag"]`` and use it
+        as the authoritative ``result.harness`` (overriding all other detection).
+        Requests without this prefix flow through the legacy detection chain
+        for backward compatibility with un-tagged installs.
+        """
+        tag = request.match_info["harness"]
+        tail = request.match_info["tail"].lstrip("/")
+
+        if tag not in _VALID_HARNESS_TAGS:
+            return _anthropic_error(
+                404, "not_found",
+                f"unknown harness tag: {tag!r}. Known: {sorted(_VALID_HARNESS_TAGS)}",
+            )
+        request["_telos_harness_tag"] = tag
+
+        # Dispatch by tail. The set is intentionally narrow: tagged URLs are
+        # generated by installers, never typed by humans, so we only honor the
+        # paths installers actually produce.
+        if tail == "v1/messages" and request.method == "POST":
+            return await self.handle_messages(request)
+        if tail.startswith("upstreams/"):
+            rest = tail[len("upstreams/"):]
+            slug, _, sub_tail = rest.partition("/")
+            if not slug:
+                return _anthropic_error(
+                    404, "not_found", "missing slug in tagged route")
+            return await self.handle_upstream_route(
+                request, slug=slug, tail=sub_tail,
+            )
+        return _anthropic_error(
+            404, "not_found",
+            f"tagged route does not support tail: {tail!r}",
+        )
+
+    # ------------------------------------------------------------------
     # POST /upstreams/{slug}/{tail:.*}  -- multi-backend route
     # ------------------------------------------------------------------
 
-    async def handle_upstream_route(self, request: web.Request) -> web.StreamResponse:
+    async def handle_upstream_route(
+        self,
+        request: web.Request,
+        *,
+        slug: str | None = None,
+        tail: str | None = None,
+    ) -> web.StreamResponse:
         """Dispatch ``/upstreams/<slug>/<...>`` requests.
 
         - ``<slug>`` must be registered in ``self.upstreams``; otherwise 404.
@@ -1218,9 +1296,15 @@ class ProxyApp:
           slug's upstream rather than ``self.upstream``).
         - Anything else under the same slug is passthrough to ``<url>/<tail>``
           (so users can hit ``/v1/models``, ``/v1/embeddings``, etc.).
+
+        ``slug`` / ``tail`` may be passed explicitly when re-dispatched from
+        the ``/_h/<harness>/upstreams/...`` tag-route handler; otherwise they
+        come from the router's match_info.
         """
-        slug = request.match_info["slug"]
-        tail = request.match_info["tail"]
+        if slug is None:
+            slug = request.match_info["slug"]
+        if tail is None:
+            tail = request.match_info["tail"]
 
         upstream_cfg = self.upstreams.get(slug)
         if upstream_cfg is None:
@@ -1438,15 +1522,18 @@ class ProxyApp:
             )
 
         # Attribution: label the usage-log entry with the calling agent's identity.
-        # Priority: slug's via field (set at install time) >
-        #           HTTP header detection (covers the common case where the proxy
-        #           started before `telos init <harness>` ran and via is not yet set).
+        # Priority: URL tag (``/_h/<harness>/`` stamped by handle_tagged_route) >
+        #           slug's via field (set at install time) >
+        #           HTTP header detection (covers un-tagged un-via'd installs).
         # The `!= "passthrough"` guard is intentionally dropped: the via field
         # identifies the *caller*, not the optimization mode — even passthrough or
         # pipeline-failure entries should be attributed to the right agent so the
         # dashboard's "breakdown by harness" stays accurate. This also aligns with
         # the anthropic-messages path in handle_upstream_route, which always applies via.
-        if upstream_cfg.via:
+        tag = request.get("_telos_harness_tag")
+        if tag:
+            result.harness = tag
+        elif upstream_cfg.via:
             result.harness = upstream_cfg.via
         else:
             _client = _client_identity(request.headers)
@@ -1738,9 +1825,11 @@ class ProxyApp:
             routing_key=None,
             model=raw.get("model", ""),
         )
-        # via wins (set at install time, e.g. ``codex``); otherwise fall back
-        # to header / per-client harness memory like _handle_openai_chat does.
-        if upstream_cfg.via:
+        # Tag wins; else via (install time); else header / per-client memory.
+        tag = request.get("_telos_harness_tag")
+        if tag:
+            result.harness = tag
+        elif upstream_cfg.via:
             result.harness = upstream_cfg.via
         else:
             _client = _client_identity(request.headers)
@@ -2075,6 +2164,12 @@ def make_app(
     # handle_messages' except into "400 Invalid JSON: Request Entity Too Large". Setting it
     # to 1 GiB is effectively unlimited.
     app = web.Application(client_max_size=1024 ** 3, middlewares=[_access_log_middleware])
+    # Tagged route: /_h/<harness>/<tail>. Strips the tag and dispatches the
+    # underlying request. Registered first so it takes priority over the bare
+    # /v1/messages and /upstreams routes.
+    app.router.add_route(
+        "*", "/_h/{harness}/{tail:.*}", proxy.handle_tagged_route,
+    )
     app.router.add_post("/v1/messages", proxy.handle_messages)
     # Multi-backend route: /upstreams/<slug>/<tail>. Registered before the
     # catch-all passthrough so the slug dispatch wins.

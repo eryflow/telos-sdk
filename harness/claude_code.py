@@ -1,22 +1,24 @@
-"""Hermes-CLI harness plugin.
+"""Claude Code harness plugin.
 
-Input contract: Anthropic ``/v1/messages`` shape, but **without** Claude
-Code's envelope conventions (``<system-reminder>``, ``<command-message>``,
-``<command-name>``) and **without** the ``<file path="...">`` ref-pool
-blocks. Those belong to Claude Code; see ``harness/claude_code.py``.
+Input contract: Anthropic ``/v1/messages`` shape, with the Claude Code
+envelope conventions (``<system-reminder>`` / ``<command-message>`` /
+``<command-name>``) and the ``<file path="...">...</file>`` ref-pool blocks.
 
-This plugin currently parses the raw Anthropic shape neutrally. As the
-Hermes-CLI product evolves its own conventions, specialize this file —
-do *not* re-add Claude Code's regexes here.
+This file was split out from ``harness/hermes.py`` in 2026-05 when the
+URL-tag attribution mechanism landed — before that, Claude Code and the
+unrelated Hermes-CLI product shared one parser misnamed ``hermes``. The two
+plugins are now maintained independently; see [docs/harness-routing.md].
 
-History: this file was reset in 2026-05 when the URL-tag attribution
-mechanism landed. The pre-2026-05 ``harness/hermes.py`` was actually
-Claude Code's parser misnamed; that content now lives in
-``harness/claude_code.py``.
+Differences vs OpenClaw (TELOS protocol §7.2):
+- a large ``<file>...</file>`` block (>2KB) → ref-pool, with the slug being the file path
+- the result of a sub-agent (the Agent tool) goes through FOLD in the parent
+  IR; the sub-IR is parsed separately by the caller through this plugin
+  again, with a different session_id
 """
 
 from __future__ import annotations
 
+import re
 from typing import Any, Mapping
 
 from telos.harness._user_split import split_user_text
@@ -32,7 +34,11 @@ from telos.ir import (
 )
 
 
-class HermesPlugin(HarnessPlugin):
+_REFPOOL_THRESHOLD = 2048
+_FILE_BLOCK_RE = re.compile(r'<file path="([^"]+)">(.*?)</file>', re.DOTALL)
+
+
+class ClaudeCodePlugin(HarnessPlugin):
     def parse(
         self,
         raw_request: Mapping[str, Any],
@@ -42,6 +48,8 @@ class HermesPlugin(HarnessPlugin):
         model: str = "",
         expected_turns: int = 0,
     ) -> TelosIR:
+        ref_pool: dict[str, TelosBlock] = {}
+
         # ---- tools ----
         def _build_tool(i: int, t: Mapping[str, Any]) -> TelosBlock:
             source, mcp_server = _classify_anthropic_tool(t)
@@ -53,7 +61,7 @@ class HermesPlugin(HarnessPlugin):
                 band=Band.PIN,
                 kind="tool_def",
                 payload=t,
-                source_tag="hermes/tools",
+                source_tag="claude-code/tools",
                 extra=extra,
             )
 
@@ -66,12 +74,27 @@ class HermesPlugin(HarnessPlugin):
         system_blocks: list[TelosBlock] = []
         for i, item in enumerate(raw_request.get("system", [])):
             text = item.get("text", "") if isinstance(item, dict) else str(item)
+            stripped = text
+            for m in _FILE_BLOCK_RE.finditer(text):
+                path, body = m.group(1), m.group(2)
+                if len(body) > _REFPOOL_THRESHOLD:
+                    slug = _slug_from_path(path)
+                    if slug not in ref_pool:
+                        ref_pool[slug] = TelosBlock(
+                            id=f"ref:{slug}",
+                            band=Band.FOLD,
+                            kind="text",
+                            payload=body,
+                            ref_slug=slug,
+                            source_tag="claude-code/file-block",
+                        )
+                    stripped = stripped.replace(m.group(0), f"[ref:{slug}]")
             system_blocks.append(TelosBlock(
                 id=f"system/{i}",
                 band=Band.PIN,
                 kind="text",
-                payload=text,
-                source_tag="hermes/system",
+                payload=stripped,
+                source_tag="claude-code/system",
             ))
 
         # ---- messages ----
@@ -94,7 +117,7 @@ class HermesPlugin(HarnessPlugin):
                         band=Band.FOLD,
                         kind="tool_result",
                         payload=item,
-                        source_tag="hermes/tool-result",
+                        source_tag="claude-code/tool-result",
                     ))
                 elif role == "assistant" and t == "text":
                     blocks.append(TelosBlock(
@@ -102,7 +125,7 @@ class HermesPlugin(HarnessPlugin):
                         band=Band.FOLD,
                         kind="text",
                         payload=item.get("text", ""),
-                        source_tag="hermes/assistant-text",
+                        source_tag="claude-code/assistant-text",
                     ))
                 elif role == "assistant" and t == "tool_use":
                     blocks.append(TelosBlock(
@@ -110,7 +133,7 @@ class HermesPlugin(HarnessPlugin):
                         band=Band.FOLD,
                         kind="tool_use",
                         payload=item,
-                        source_tag="hermes/assistant-tool-use",
+                        source_tag="claude-code/assistant-tool-use",
                     ))
                 elif role == "assistant" and t == "thinking":
                     blocks.append(TelosBlock(
@@ -118,7 +141,7 @@ class HermesPlugin(HarnessPlugin):
                         band=Band.FOLD,
                         kind="thinking",
                         payload=item,
-                        source_tag="hermes/thinking",
+                        source_tag="claude-code/thinking",
                     ))
                 else:
                     blocks.append(TelosBlock(
@@ -126,7 +149,7 @@ class HermesPlugin(HarnessPlugin):
                         band=Band.FOLD,
                         kind=t or "text",
                         payload=item,
-                        source_tag="hermes/other",
+                        source_tag="claude-code/other",
                     ))
             messages.append(TelosMessage(role=role, blocks=enforce_band_order(blocks)))
 
@@ -135,10 +158,15 @@ class HermesPlugin(HarnessPlugin):
             tools=tools,
             system=tuple(system_blocks),
             messages=tuple(messages),
-            ref_pool={},
+            ref_pool=ref_pool,
             hints=TelosHints(
                 engine=engine,  # type: ignore[arg-type]
                 model=model,
                 expected_turns=expected_turns,
             ),
         )
+
+
+def _slug_from_path(path: str) -> str:
+    """``src/auth/login.py`` → ``src.auth.login.py``."""
+    return path.replace("/", ".")

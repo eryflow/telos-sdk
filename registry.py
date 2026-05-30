@@ -14,56 +14,51 @@ if TYPE_CHECKING:
     from telos.engine.base import EngineAdapter
 
 
-_HARNESS_ALIASES: dict[str, str] = {
-    "claude-code": "hermes",
-}
-
-
-def canonical_harness(name: str) -> str:
-    """Resolve a harness alias into its canonical name (``claude-code`` → ``hermes``).
-
-    Non-aliases are returned as-is. This ensures the usage log / dashboard show a
-    consistent harness whether the caller passes an alias or the canonical name.
-    """
-    return _HARNESS_ALIASES.get(name, name)
-
-
-# canonical harness name → human-facing display name shown on dashboards/reports.
-# The internal codename (hermes) is not intuitive to users —— the dashboard always
-# shows the name from here.
+# Canonical harness name → human-facing display name shown on dashboards/reports.
+# These four are the user-visible identities; each owns its own installer
+# (init/<name>.py) and its own parser plugin (harness/<name>.py).
 _HARNESS_DISPLAY_NAMES: dict[str, str] = {
-    "openclaw": "OpenClaw",
-    "hermes": "Claude Code",
-    "telos": "Telos",
-    "codex": "Codex",
+    "claude-code": "Claude Code",
+    "hermes":      "Hermes",
+    "openclaw":    "OpenClaw",
+    "codex":       "Codex",
+    "telos":       "Telos",   # internal — not user-installable
 }
 
 
 def harness_display_name(name: str) -> str:
-    """Map a harness name (canonical or alias) to its dashboard display name.
+    """Map a harness name to its dashboard display name.
 
-    ``hermes`` / ``claude-code`` → ``"Claude Code"``. Unknown names (e.g.
-    ``passthrough`` / ``rtk-only`` / ``?``) are returned as-is.
+    Unknown names (``passthrough`` / ``rtk-only`` / ``?``) are returned as-is
+    so the dashboard's "Breakdown by harness" can surface anonymous traffic
+    without a lookup miss.
     """
     if not name:
         return name
-    return _HARNESS_DISPLAY_NAMES.get(canonical_harness(name), name)
+    return _HARNESS_DISPLAY_NAMES.get(name, name)
 
 
 def load_harness(name: str) -> "HarnessPlugin":
     """Load a harness plugin by name.
 
-    Supported: ``openclaw``, ``hermes``, ``telos``
-    Alias: ``claude-code`` → hermes
+    Supported: ``claude-code``, ``hermes``, ``openclaw``, ``codex``, ``telos``.
+
+    Each name maps one-to-one to ``harness/<name with hyphens → underscores>.py``.
+    Aliases were removed in 2026-05; callers must pass the canonical name.
     """
-    canonical = canonical_harness(name)
-    if canonical == "openclaw":
-        from telos.harness.openclaw import OpenClawPlugin
-        return OpenClawPlugin()
-    if canonical == "hermes":
+    if name == "claude-code":
+        from telos.harness.claude_code import ClaudeCodePlugin
+        return ClaudeCodePlugin()
+    if name == "hermes":
         from telos.harness.hermes import HermesPlugin
         return HermesPlugin()
-    if canonical == "telos":
+    if name == "openclaw":
+        from telos.harness.openclaw import OpenClawPlugin
+        return OpenClawPlugin()
+    if name == "codex":
+        from telos.harness.codex import CodexPlugin
+        return CodexPlugin()
+    if name == "telos":
         from telos.harness.telos import TelosPlugin
         return TelosPlugin()
     raise ValueError(f"Unknown harness plugin: {name!r}")

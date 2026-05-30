@@ -72,17 +72,17 @@ from telos.bridge import BridgeSessionState
 #      detection cannot obtain yet is stable and reliable for every request. The
 #      proxy path passes the request headers in.
 
-_HERMES_MARKER_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+_CLAUDE_CODE_MARKER_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     re.compile(rf"<{tag}>.*?</{tag}>", re.DOTALL)
     for tag in ("system-reminder", "command-message", "command-name")
 )
 
 # Claude Code always carries several of this tool set; ≥ 3 hits is treated as Claude Code.
-_HERMES_TOOL_FINGERPRINT: frozenset[str] = frozenset({
+_CLAUDE_CODE_TOOL_FINGERPRINT: frozenset[str] = frozenset({
     "Bash", "Edit", "Read", "Write", "Grep", "Glob",
     "TodoWrite", "Task", "WebFetch", "WebSearch", "NotebookEdit",
 })
-_HERMES_TOOL_HITS_REQUIRED = 3
+_CLAUDE_CODE_TOOL_HITS_REQUIRED = 3
 
 
 def _flatten_system_text(raw_request: Mapping[str, Any]) -> str:
@@ -132,18 +132,18 @@ def _has_thinking_block(raw_request: Mapping[str, Any]) -> bool:
     return False
 
 
-def _has_hermes_marker(text: str) -> bool:
-    return any(p.search(text) for p in _HERMES_MARKER_PATTERNS)
+def _has_claude_code_marker(text: str) -> bool:
+    return any(p.search(text) for p in _CLAUDE_CODE_MARKER_PATTERNS)
 
 
-def _tool_fingerprint_matches_hermes(raw_request: Mapping[str, Any]) -> bool:
+def _tool_fingerprint_matches_claude_code(raw_request: Mapping[str, Any]) -> bool:
     names: set[str] = set()
     for t in raw_request.get("tools", []) or []:
         if isinstance(t, Mapping):
             n = t.get("name")
             if isinstance(n, str):
                 names.add(n)
-    return len(names & _HERMES_TOOL_FINGERPRINT) >= _HERMES_TOOL_HITS_REQUIRED
+    return len(names & _CLAUDE_CODE_TOOL_FINGERPRINT) >= _CLAUDE_CODE_TOOL_HITS_REQUIRED
 
 
 # HTTP header fingerprint of the official Claude Code CLI. The same agent process
@@ -151,12 +151,12 @@ def _tool_fingerprint_matches_hermes(raw_request: Mapping[str, Any]) -> bool:
 # conversation and auxiliary requests (Haiku title generation / topic detection
 # etc.) — exactly the per-client signal that content detection cannot obtain yet
 # is stable and reliable for every request.
-_HERMES_USER_AGENT_SUBSTR = "claude-cli"   # User-Agent looks like claude-cli/1.x.x ...
-_HERMES_X_APP_VALUE = "cli"                # Claude Code sets x-app: cli
+_CLAUDE_CODE_USER_AGENT_SUBSTR = "claude-cli"   # User-Agent looks like claude-cli/1.x.x ...
+_CLAUDE_CODE_X_APP_VALUE = "cli"                # Claude Code sets x-app: cli
 
 
 def _detect_harness_from_headers(headers: Mapping[str, str]) -> str | None:
-    """Identify the harness from the HTTP request headers. Hit on Claude Code → ``"hermes"``, otherwise ``None``.
+    """Identify the harness from the HTTP request headers. Hit on Claude Code → ``"claude-code"``, otherwise ``None``.
 
     Header keys are case-insensitive (HTTP spec); here they are lowercased
     uniformly before lookup, compatible with aiohttp's ``CIMultiDict`` and the
@@ -166,10 +166,10 @@ def _detect_harness_from_headers(headers: Mapping[str, str]) -> str | None:
         return None
     lowered = {str(k).lower(): str(v) for k, v in headers.items()}
     ua = lowered.get("user-agent", "").lower()
-    if _HERMES_USER_AGENT_SUBSTR in ua:
-        return "hermes"
-    if lowered.get("x-app", "").lower() == _HERMES_X_APP_VALUE:
-        return "hermes"
+    if _CLAUDE_CODE_USER_AGENT_SUBSTR in ua:
+        return "claude-code"
+    if lowered.get("x-app", "").lower() == _CLAUDE_CODE_X_APP_VALUE:
+        return "claude-code"
     return None
 
 
@@ -192,19 +192,19 @@ def _detect_harness_signal(
             return from_headers
 
     # 1) envelope tags (system segment + all user message text)
-    if _has_hermes_marker(_flatten_system_text(raw_request)):
-        return "hermes"
+    if _has_claude_code_marker(_flatten_system_text(raw_request)):
+        return "claude-code"
     for ut in _iter_user_text(raw_request):
-        if _has_hermes_marker(ut):
-            return "hermes"
+        if _has_claude_code_marker(ut):
+            return "claude-code"
 
     # 2) assistant thinking block
     if _has_thinking_block(raw_request):
-        return "hermes"
+        return "claude-code"
 
     # 3) tool-set fingerprint (works even when the first turn has no reminder injected)
-    if _tool_fingerprint_matches_hermes(raw_request):
-        return "hermes"
+    if _tool_fingerprint_matches_claude_code(raw_request):
+        return "claude-code"
 
     return None
 

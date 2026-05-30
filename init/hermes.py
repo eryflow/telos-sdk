@@ -42,10 +42,12 @@ _DEFAULT_GATEWAY_URL = "http://127.0.0.1:7171"
 _STATE_VERSION = 2
 _PRIMARY_KEY = "__primary__"  # synthetic id for the top-level model block
 
-_TELOS_ROUTE_RE = re.compile(r"^https?://[^/]+/upstreams/[A-Za-z0-9_\-.]+/?$")
+_TELOS_ROUTE_RE = re.compile(
+    r"^https?://[^/]+(/_h/[a-z][a-z0-9-]+)?/upstreams/[A-Za-z0-9_\-.]+/?$"
+)
 # Matches credential-pool URLs which include the /v1 version segment.
 _TELOS_POOL_ROUTE_RE = re.compile(
-    r"^https?://[^/]+/upstreams/[A-Za-z0-9_\-.]+/v\d+/?$"
+    r"^https?://[^/]+(/_h/[a-z][a-z0-9-]+)?/upstreams/[A-Za-z0-9_\-.]+/v\d+/?$"
 )
 
 
@@ -225,7 +227,7 @@ class HermesInstaller(AgentInstaller):
         return self._config_path.parent / "auth.json"
 
     def _telos_route_url(self, slug: str) -> str:
-        return f"{self.proxy_url.rstrip('/')}/upstreams/{slug}"
+        return f"{self.proxy_url.rstrip('/')}/_h/hermes/upstreams/{slug}"
 
     def _telos_pool_url(self, slug: str) -> str:
         """Credential pool base_url with /v1 suffix.

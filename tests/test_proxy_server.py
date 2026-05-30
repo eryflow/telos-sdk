@@ -207,7 +207,7 @@ async def _test_usage_log_written(tmp_log: Path) -> None:
         line = tmp_log.read_text().strip().splitlines()[-1]
         record = json.loads(line)
         assert record["session_id"] == "log-test"
-        assert record["harness"] in ("openclaw", "hermes")
+        assert record["harness"] in ("openclaw", "claude-code")
         assert record["normalized"]["cache_read"] == 1000
         assert record["normalized"]["output"] == 5
         print("✓ test_usage_log_written")
@@ -431,6 +431,112 @@ def test_wire_tool_result_first_helper() -> None:
     print("✓ test_wire_tool_result_first_helper")
 
 
+async def _test_passthrough_attribution_preserves_claude_code(tmp_log: Path) -> None:
+    """A pipeline failure must not erase claude-code attribution in the usage log.
+
+    Regression: handle_messages used to write ``harness="passthrough"`` on
+    degradation, hiding Claude Code traffic in the dashboard's "breakdown by
+    harness". The overlay now re-resolves via ``_resolve_harness`` which
+    first honors the ``/_h/<harness>/`` URL tag and otherwise falls back to
+    User-Agent / content / sticky memory.
+    """
+    from telos.proxy import server as srv_mod
+
+    mock = _MockUpstream(sse=False)
+    up_runner, up_url = await _start_upstream(mock)
+    px_runner, px_url = await _start_proxy(up_url, usage_log=tmp_log)
+
+    original = srv_mod.process_anthropic_request
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("simulated TELOS bug")
+
+    srv_mod.process_anthropic_request = boom
+    try:
+        async with aiohttp.ClientSession() as client:
+            async with client.post(
+                f"{px_url}/v1/messages",
+                json={
+                    "model": "claude-opus-4-7",
+                    "max_tokens": 16,
+                    "system": [{"type": "text", "text": "agent"}],
+                    "messages": [{"role": "user",
+                                  "content": [{"type": "text", "text": "x"}]}],
+                },
+                headers={"x-api-key": "k",
+                         "anthropic-version": "2023-06-01",
+                         "x-telos-session": "claude-code-attr",
+                         "user-agent": "claude-cli/1.0.123 (External, cli)"},
+            ) as resp:
+                assert resp.status == 200, await resp.text()
+
+        line = tmp_log.read_text().strip().splitlines()[-1]
+        record = json.loads(line)
+        assert record["session_id"] == "claude-code-attr"
+        assert record["harness"] == "claude-code", \
+            f"claude-code attribution lost on passthrough: {record['harness']!r}"
+        print("✓ test_passthrough_attribution_preserves_claude_code")
+    finally:
+        srv_mod.process_anthropic_request = original
+        await px_runner.cleanup()
+        await up_runner.cleanup()
+
+
+async def _test_url_tag_attribution(tmp_log: Path) -> None:
+    """``/_h/<harness>/v1/messages`` stamps result.harness with the URL tag,
+    overriding header / content detection."""
+    mock = _MockUpstream(sse=False)
+    up_runner, up_url = await _start_upstream(mock)
+    px_runner, px_url = await _start_proxy(up_url, usage_log=tmp_log)
+    try:
+        async with aiohttp.ClientSession() as client:
+            # Deliberately send a User-Agent that would normally pin this client
+            # as claude-code. The URL tag says openclaw — tag must win.
+            async with client.post(
+                f"{px_url}/_h/openclaw/v1/messages",
+                json={
+                    "model": "claude-opus-4-7",
+                    "max_tokens": 16,
+                    "system": [{"type": "text", "text": "agent"}],
+                    "messages": [{"role": "user",
+                                  "content": [{"type": "text", "text": "x"}]}],
+                },
+                headers={"x-api-key": "k",
+                         "anthropic-version": "2023-06-01",
+                         "x-telos-session": "tag-test",
+                         "user-agent": "claude-cli/1.0 (External, cli)"},
+            ) as resp:
+                assert resp.status == 200, await resp.text()
+        line = tmp_log.read_text().strip().splitlines()[-1]
+        record = json.loads(line)
+        assert record["session_id"] == "tag-test"
+        assert record["harness"] == "openclaw", \
+            f"URL tag must win over header detection; got {record['harness']!r}"
+        print("✓ test_url_tag_attribution")
+    finally:
+        await px_runner.cleanup()
+        await up_runner.cleanup()
+
+
+async def _test_url_tag_unknown_returns_404() -> None:
+    """An unknown tag must 404, not silently fall through to detection."""
+    mock = _MockUpstream(sse=False)
+    up_runner, up_url = await _start_upstream(mock)
+    px_runner, px_url = await _start_proxy(up_url)
+    try:
+        async with aiohttp.ClientSession() as client:
+            async with client.post(
+                f"{px_url}/_h/bogus/v1/messages",
+                json={"model": "m", "max_tokens": 1, "messages": []},
+                headers={"x-api-key": "k"},
+            ) as resp:
+                assert resp.status == 404, await resp.text()
+        print("✓ test_url_tag_unknown_returns_404")
+    finally:
+        await px_runner.cleanup()
+        await up_runner.cleanup()
+
+
 async def _test_invalid_wire_falls_back_to_passthrough() -> None:
     """TELOS produces an invalid wire with tool_result last → the proxy falls back to passthrough."""
     from telos.proxy import server as srv_mod
@@ -498,6 +604,9 @@ async def _run_all(tmp_log: Path) -> None:
     await _test_retries_transient_connect_failure()
     await _test_502_after_exhausting_retries()
     await _test_invalid_wire_falls_back_to_passthrough()
+    await _test_passthrough_attribution_preserves_claude_code(tmp_log)
+    await _test_url_tag_attribution(tmp_log)
+    await _test_url_tag_unknown_returns_404()
 
 
 def main() -> None:

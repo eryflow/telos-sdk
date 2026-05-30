@@ -45,7 +45,9 @@ _STATE_VERSION = 2
 # when a current baseUrl is a stale telos route rather than the user's
 # original upstream. The slug pattern is intentionally loose (URL-safe
 # identifier) so user-named slugs are recognized too.
-_TELOS_ROUTE_RE = re.compile(r"^https?://[^/]+/upstreams/[A-Za-z0-9_\-.]+/?$")
+_TELOS_ROUTE_RE = re.compile(
+    r"^https?://[^/]+(/_h/[a-z][a-z0-9-]+)?/upstreams/[A-Za-z0-9_\-.]+/?$"
+)
 
 
 def _looks_like_telos_route(url: str) -> bool:
@@ -190,7 +192,7 @@ class OpenClawInstaller(AgentInstaller):
         return data
 
     def _telos_route_url(self, slug: str) -> str:
-        return f"{self.proxy_url.rstrip('/')}/upstreams/{slug}"
+        return f"{self.proxy_url.rstrip('/')}/_h/openclaw/upstreams/{slug}"
 
     def _ensure_upstream_slug(
         self, telos_cfg: TelosConfig, slug: str, url: str, api: str,
