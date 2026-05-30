@@ -64,14 +64,19 @@ def _harness_arg(value: str) -> str:
     )
 
 
-def _is_injected(name: str) -> bool:
+def _is_injected(name: str, gateway_url: str = "") -> bool:
     """Whether telos currently has its gateway redirect injected for ``name``.
+
+    ``gateway_url`` must be the address the injected configs are expected to
+    point at: openclaw/hermes match their route URL exactly, so an empty/wrong
+    host would misreport an injected harness as "not connected". Pass the
+    running daemon's URL (else the config default) — see ``_resolve_gateway_url``.
 
     On error (e.g. a malformed config file) returns ``True`` so the uninstall step
     still runs and surfaces the underlying error rather than silently skipping it.
     """
     try:
-        return _make_installer(name, "").status().already_installed
+        return _make_installer(name, gateway_url).status().already_installed
     except Exception:  # noqa: BLE001 - a broken config shouldn't hide the harness
         return True
 
@@ -301,10 +306,13 @@ def uninstall_main(argv: list[str] | None = None) -> int:
     # Only revert harnesses telos has actually injected — uninstalling a harness
     # that was never connected is a confusing no-op. 'generic' holds no state (it
     # just prints advice), so it always runs when explicitly requested.
+    # Resolve the gateway URL the injected configs should point at so the
+    # exact-match installers (openclaw/hermes) recognize their own routes.
+    inject_url, _ = _resolve_gateway_url(None, load_config())
     targets: list[str] = []
     skipped: list[str] = []
     for name in requested:
-        if name == "generic" or _is_injected(name):
+        if name == "generic" or _is_injected(name, inject_url):
             targets.append(name)
         else:
             skipped.append(name)

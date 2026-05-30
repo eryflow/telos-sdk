@@ -391,6 +391,11 @@ def _gather_status() -> dict:
         })
 
     # ---- harnesses (injection) ----
+    # The injection URL the installers should compare against: the running
+    # gateway if any, else the config default. openclaw/hermes match the route
+    # URL exactly, so passing an empty/wrong host would misreport them as
+    # "stale / not injected".
+    gateway_url = state.base_url() if state is not None else cfg.gateway.base_url()
     harnesses: list[dict] = []
     for name in HARNESS_NAMES:
         spec = HARNESS_SPECS[name]
@@ -405,7 +410,7 @@ def _gather_status() -> dict:
         }
         if name in INSTALLERS:
             try:
-                res = INSTALLERS[name](proxy_url="").status()
+                res = INSTALLERS[name](proxy_url=gateway_url).status()
                 entry["injected"] = res.already_installed
                 entry["notes"] = list(res.notes)
             except Exception as e:  # noqa: BLE001 - a broken config shouldn't break status
