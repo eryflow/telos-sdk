@@ -209,10 +209,62 @@ def test_explicit_harness_overrides_sticky() -> None:
     print("✓ test_explicit_harness_overrides_sticky")
 
 
+def test_pipeline_strips_inherited_cache_control() -> None:
+    """A request whose blocks already carry Anthropic ``cache_control`` markers
+    (as real Claude Code requests do) must not leak them onto the wire: TELOS is
+    the sole authority on breakpoints. Otherwise a stale ``ttl='1h'`` marker can
+    land after a TELOS ``5m`` anchor and the upstream rejects it with HTTP 400.
+    """
+    msgs: list[dict] = []
+    for i in range(20):
+        msgs.append({"role": "user", "content": [{"type": "text", "text": f"q{i}"}]})
+        msgs.append({"role": "assistant", "content": [
+            {"type": "tool_use", "id": f"t{i}", "name": "Read", "input": {"p": str(i)}}]})
+        tr: dict = {"type": "tool_result", "tool_use_id": f"t{i}", "content": "x" * 10}
+        if i >= 17:  # Claude Code marks its most recent tool_results
+            tr["cache_control"] = {"type": "ephemeral", "ttl": "1h"}
+        msgs.append({"role": "user", "content": [tr]})
+
+    req = {
+        "model": "claude-opus-4-7", "max_tokens": 1024,
+        "tools": [{"name": "Read", "input_schema": {"type": "object"},
+                   "cache_control": {"type": "ephemeral", "ttl": "1h"}}],
+        "system": [{"type": "text", "text": "You are Claude Code.",
+                    "cache_control": {"type": "ephemeral", "ttl": "1h"}}],
+        "messages": msgs,
+    }
+    r = process_anthropic_request(req, session_id="t-strip-cc")
+
+    # Collect every cache_control TTL in Anthropic's processing order.
+    order: list[tuple[str, str]] = []
+    for t in r.wire.get("tools", []):
+        if "cache_control" in t:
+            order.append(("tool", t["cache_control"].get("ttl", "5m")))
+    for s in r.wire.get("system", []):
+        if "cache_control" in s:
+            order.append(("system", s["cache_control"].get("ttl", "5m")))
+    for mi, m in enumerate(r.wire.get("messages", [])):
+        for c in m["content"]:
+            if isinstance(c, dict) and "cache_control" in c:
+                order.append((f"msg{mi}", c["cache_control"].get("ttl", "5m")))
+
+    # No more than the 4 breakpoints TELOS controls — no inherited leakage.
+    assert len(order) <= 4, f"inherited cache_control leaked onto wire: {order}"
+    # And a 1h block must never follow a 5m block.
+    seen_5m = False
+    for where, ttl in order:
+        if ttl == "5m":
+            seen_5m = True
+        assert not (ttl == "1h" and seen_5m), \
+            f"1h cache_control after 5m at {where}: {order}"
+    print(f"✓ test_pipeline_strips_inherited_cache_control (order={order})")
+
+
 def main() -> None:
     test_pipeline_detects_openclaw()
     test_pipeline_detects_claude_code()
     test_pipeline_injects_cache_control()
+    test_pipeline_strips_inherited_cache_control()
     test_pipeline_explicit_harness_override()
     test_pipeline_passthrough_fields()
     test_detect_claude_code_marker_in_user_message()

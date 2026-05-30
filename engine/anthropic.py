@@ -170,8 +170,11 @@ class AnthropicAdapter(EngineAdapter):
     # ------------------------------------------------------------------
 
     def _render_tool(self, blk, slot: MarkSlot | None) -> dict[str, Any]:
-        # Assume the tool_def payload is already {"name": ..., "input_schema": {...}}
-        out: dict[str, Any] = dict(blk.payload)
+        # Assume the tool_def payload is already {"name": ..., "input_schema": {...}}.
+        # Drop any cache_control the upstream client (e.g. Claude Code) already
+        # placed on the block: TELOS is the sole authority on breakpoints, and a
+        # carried-over marker would break the tools→system→messages TTL ordering.
+        out: dict[str, Any] = _strip_cache_control(blk.payload)
         if slot is not None:
             out["cache_control"] = _cache_control_for(slot)
         return out
@@ -186,21 +189,22 @@ class AnthropicAdapter(EngineAdapter):
         if blk.kind == "text":
             return self._render_text_block(blk, slot)
         if blk.kind == "tool_use":
-            out = {"type": "tool_use", **blk.payload}
+            out = {"type": "tool_use", **_strip_cache_control(blk.payload)}
             if slot is not None:
                 out["cache_control"] = _cache_control_for(slot)
             return out
         if blk.kind == "tool_result":
-            out = {"type": "tool_result", **blk.payload}
+            out = {"type": "tool_result", **_strip_cache_control(blk.payload)}
             if slot is not None:
                 out["cache_control"] = _cache_control_for(slot)
             return out
         if blk.kind == "thinking":
             # thinking blocks cannot have cache_control attached directly; a slot should not land here
-            return {"type": "thinking", **blk.payload}
+            return {"type": "thinking", **_strip_cache_control(blk.payload)}
         if blk.kind == "image":
             # the detail field must be stable (it must come from extra, not be recomputed at emit time)
-            out = {"type": "image", "source": blk.payload, **dict(blk.extra)}
+            out = {"type": "image", "source": blk.payload,
+                   **_strip_cache_control(blk.extra)}
             return out
         raise ValueError(f"Unknown block kind: {blk.kind}")
 
@@ -227,6 +231,24 @@ def _cache_control_for(slot: MarkSlot) -> dict[str, str]:
     if slot.ttl_class == "long":
         return {"type": "ephemeral", "ttl": "1h"}
     return {"type": "ephemeral"}  # default 5m
+
+
+def _strip_cache_control(payload: Any) -> dict[str, Any]:
+    """Shallow-copy a block payload/extra into a dict with any ``cache_control``
+    removed.
+
+    Upstream clients (notably Claude Code) place their own ``cache_control``
+    breakpoints on tool / tool_use / tool_result blocks. Those markers travel
+    through the IR inside the block payload, so when ``emit`` spreads the payload
+    (``{"type": "tool_result", **payload}``) the stale marker reappears on the
+    wire alongside the breakpoint TELOS itself assigns. With a mix of TTLs that
+    violates Anthropic's rule that a 1h block must not follow a 5m block in the
+    ``tools → system → messages`` order, yielding HTTP 400. TELOS is the single
+    authority on breakpoints, so we drop any inherited marker here.
+    """
+    if not isinstance(payload, Mapping):
+        return dict(payload) if payload else {}
+    return {k: v for k, v in payload.items() if k != "cache_control"}
 
 
 def _build_slot_index(plan: EmitPlan):
