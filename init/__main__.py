@@ -16,9 +16,11 @@ command (which lives in :mod:`telos.cli`).
 from __future__ import annotations
 
 import argparse
+import shutil
+import subprocess
 import sys
 
-from telos.config import config_path, load_config
+from telos.config import config_path, load_config, telos_home
 from telos.harnesses import HARNESS_NAMES, detect_installed
 from telos.init import INSTALLERS
 from telos.init.base import InstallResult
@@ -170,11 +172,63 @@ def main(argv: list[str] | None = None) -> int:
     return rc
 
 
+def _stop_gateway() -> None:
+    """Stop the background gateway daemon if it is running."""
+    try:
+        from telos.gateway import daemon
+        stopped = daemon.stop()
+    except Exception as e:  # noqa: BLE001 - daemon module is best-effort here
+        print(f"warning: failed to stop the gateway: {e}", file=sys.stderr)
+        return
+    if stopped:
+        print("✓ gateway daemon stopped")
+    else:
+        print("  gateway daemon was not running")
+
+
+def _remove_telos_home() -> None:
+    """Delete the ``~/.telos`` directory (local config + state + logs)."""
+    home = telos_home()
+    if not home.exists():
+        print(f"  {home} does not exist, nothing to remove")
+        return
+    try:
+        shutil.rmtree(home)
+    except Exception as e:  # noqa: BLE001
+        print(f"warning: failed to remove {home}: {e}", file=sys.stderr)
+        return
+    print(f"✓ removed {home}")
+
+
+def _pip_uninstall_self() -> None:
+    """Uninstall the installed ``telos-sdk`` distribution via pip.
+
+    The current process keeps running off already-imported modules, so this is
+    safe to call from within ``telos uninstall`` — pip only removes the on-disk
+    files.
+    """
+    cmd = [sys.executable, "-m", "pip", "uninstall", "-y", "telos-sdk"]
+    print(f"$ {' '.join(cmd)}")
+    try:
+        rc = subprocess.call(cmd)
+    except Exception as e:  # noqa: BLE001
+        print(f"warning: failed to run pip uninstall: {e}", file=sys.stderr)
+        return
+    if rc == 0:
+        print("✓ telos-sdk uninstalled")
+    else:
+        print(f"warning: pip uninstall exited with code {rc}", file=sys.stderr)
+
+
 def uninstall_main(argv: list[str] | None = None) -> int:
     """``telos uninstall`` entry point — undo the gateway config injection.
 
     By default applies to every known harness so a single command restores the
     pre-``telos init`` state. Pass ``--harness <name>`` to scope to one.
+
+    With ``--purge`` it goes further and fully removes telos: after reverting the
+    harness configs it stops the gateway daemon, deletes ``~/.telos`` and
+    uninstalls the ``telos-sdk`` package itself.
     """
     parser = argparse.ArgumentParser(
         prog="telos uninstall",
@@ -183,6 +237,10 @@ def uninstall_main(argv: list[str] | None = None) -> int:
     parser.add_argument("--harness", "--agent", dest="harness", default=None,
                         choices=sorted(INSTALLERS.keys()),
                         help="operate only on the specified harness (default: apply to all known harnesses)")
+    parser.add_argument("--purge", action="store_true",
+                        help="fully remove telos: also stop the gateway, delete ~/.telos and uninstall the telos-sdk package")
+    parser.add_argument("-y", "--yes", dest="assume_yes", action="store_true",
+                        help="skip the confirmation prompt for --purge")
     args = parser.parse_args(argv)
 
     if args.harness:
@@ -190,11 +248,34 @@ def uninstall_main(argv: list[str] | None = None) -> int:
     else:
         targets = [n for n in HARNESS_NAMES if n in INSTALLERS]
 
+    # --purge is destructive (deletes ~/.telos and uninstalls the package).
+    # It implies all harnesses, and confirms before proceeding.
+    if args.purge:
+        if args.harness:
+            print("--purge applies to the whole installation; ignoring --harness.",
+                  file=sys.stderr)
+            targets = [n for n in HARNESS_NAMES if n in INSTALLERS]
+        from telos.cli_menu import confirm
+        if not args.assume_yes and not confirm(
+            "This will revert all harness configs, stop the gateway, delete "
+            f"{telos_home()} and uninstall telos-sdk. Continue?",
+            default=False,
+        ):
+            print("aborted.")
+            return 1
+
     rc = 0
     for name in targets:
         # gateway URL is irrelevant for uninstall; pass an empty placeholder.
         sub_rc, _ = _run_one(name, "", uninstall=True, status=False)
         rc |= sub_rc
+
+    if args.purge:
+        print()
+        _stop_gateway()
+        _remove_telos_home()
+        _pip_uninstall_self()
+
     return rc
 
 

@@ -5,7 +5,7 @@ Subcommands:
 - ``telos``               bare command → pick a harness and enter its CLI
 - ``telos <harness>``     directly enter a harness (claude-code / codex / openclaw / hermes)
 - ``telos init``          auto-detect harnesses → inject → start gateway in background → print dashboard
-- ``telos uninstall``     undo the injection from ``telos init`` (per-harness with ``--harness``)
+- ``telos uninstall``     undo the injection from ``telos init`` (per-harness with ``--harness``; ``--purge`` fully removes telos)
 - ``telos gateway``       start / stop / view the gateway
 - ``telos dashboard``     open the dashboard in a browser (``restart`` cycles the gateway serving it)
 - ``telos mode``          switch the optimization mode (hot-updates the running gateway)
@@ -436,7 +436,7 @@ def _print_usage() -> None:
         "subcommands:\n"
         "  <harness>   directly enter a harness (claude-code / codex / openclaw / hermes)\n"
         "  init        auto-detect harnesses, inject config, start the gateway\n"
-        "  uninstall   undo the injection from 'init' (all harnesses, or one via --harness)\n"
+        "  uninstall   undo the injection from 'init' (all harnesses, or one via --harness; --purge fully removes telos)\n"
         "  gateway     start / stop / view the gateway (start|stop|status|restart)\n"
         "  dashboard   open the saved-token / saved-$ dashboard in a browser (dashboard restart restarts it; dashboard reset zeroes it)\n"
         "  mode        switch the optimization mode (none|telos|rtk|both), hot-updates the running gateway\n"
