@@ -216,7 +216,7 @@ TELOS 只做一件事：**上下文是你的，Agent 是雇的。** 当前路线
 
 ## Citation
 
-Core contributors: Zheng Wang, Shenzhi Wang, Yue Wu, Shiji Song, Gao Huang
+Core contributors: Zheng Wang, Shenzhi Wang, HongTao Zhong, Shiji Song, Gao Huang
 
 ```bibtex
 @misc{wang2026telos-agent,
