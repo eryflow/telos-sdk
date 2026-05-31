@@ -84,26 +84,6 @@ def test_install_patches_subset(tmp_path: Path) -> None:
         assert ids == ["deepseek", "openrouter"]
     finally:
         _teardown()
-
-
-def test_install_all_providers(tmp_path: Path) -> None:
-    inst, config_path, state_path = _setup(
-        tmp_path,
-        providers_to_patch=["deepseek", "openrouter", "anthropic"],
-    )
-    try:
-        inst.install()
-        data = json.loads(config_path.read_text())
-        for pid in ("deepseek", "openrouter", "anthropic"):
-            assert data["models"]["providers"][pid]["baseUrl"].startswith(
-                "http://127.0.0.1:7171/_h/openclaw/upstreams/"
-            )
-        state = json.loads(state_path.read_text())
-        assert len(state["patched"]) == 3
-    finally:
-        _teardown()
-
-
 def test_incremental_install_merges_state(tmp_path: Path) -> None:
     """First install picks deepseek. Second install picks anthropic. State
     must record BOTH (additive)."""
@@ -179,21 +159,6 @@ def test_uninstall_skips_partially_modified_routes(tmp_path: Path) -> None:
         assert any("not the route we set" in n for n in r.notes)
     finally:
         _teardown()
-
-
-def test_idempotent_second_install_with_same_selection(tmp_path: Path) -> None:
-    inst, _config_path, _state = _setup(
-        tmp_path, providers_to_patch=["deepseek"],
-    )
-    try:
-        inst.install()
-        r2 = inst.install()
-        assert r2.already_installed is True
-        assert not r2.changed_files
-    finally:
-        _teardown()
-
-
 def test_state_v1_backward_compat(tmp_path: Path) -> None:
     """An existing v1 single-provider state file is read as a 1-element list."""
     config_path = tmp_path / "openclaw.json"

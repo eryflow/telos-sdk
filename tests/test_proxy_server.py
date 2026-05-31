@@ -593,29 +593,49 @@ async def _test_invalid_wire_falls_back_to_passthrough() -> None:
         await up_runner.cleanup()
 
 
-async def _run_all(tmp_log: Path) -> None:
-    test_wire_tool_result_first_helper()
-    await _test_non_streaming()
-    await _test_streaming_sse()
-    await _test_usage_log_written(tmp_log)
-    await _test_pipeline_error_returns_anthropic_error()
-    await _test_pipeline_failure_falls_back_to_passthrough()
-    await _test_strict_mode_returns_500_on_pipeline_failure()
-    await _test_retries_transient_connect_failure()
-    await _test_502_after_exhausting_retries()
-    await _test_invalid_wire_falls_back_to_passthrough()
-    await _test_passthrough_attribution_preserves_claude_code(tmp_log)
-    await _test_url_tag_attribution(tmp_log)
-    await _test_url_tag_unknown_returns_404()
+def test_non_streaming() -> None:
+    asyncio.run(_test_non_streaming())
 
 
-def main() -> None:
-    import tempfile
-    with tempfile.TemporaryDirectory() as td:
-        tmp_log = Path(td) / "usage.jsonl"
-        asyncio.run(_run_all(tmp_log))
-    print("\nall proxy server tests passed.")
+def test_streaming_sse() -> None:
+    asyncio.run(_test_streaming_sse())
 
 
-if __name__ == "__main__":
-    main()
+def test_usage_log_written(tmp_path) -> None:
+    asyncio.run(_test_usage_log_written(tmp_path / "usage.jsonl"))
+
+
+def test_pipeline_error_returns_anthropic_error() -> None:
+    asyncio.run(_test_pipeline_error_returns_anthropic_error())
+
+
+def test_pipeline_failure_falls_back_to_passthrough() -> None:
+    asyncio.run(_test_pipeline_failure_falls_back_to_passthrough())
+
+
+def test_strict_mode_returns_500_on_pipeline_failure() -> None:
+    asyncio.run(_test_strict_mode_returns_500_on_pipeline_failure())
+
+
+def test_retries_transient_connect_failure() -> None:
+    asyncio.run(_test_retries_transient_connect_failure())
+
+
+def test_502_after_exhausting_retries() -> None:
+    asyncio.run(_test_502_after_exhausting_retries())
+
+
+def test_invalid_wire_falls_back_to_passthrough() -> None:
+    asyncio.run(_test_invalid_wire_falls_back_to_passthrough())
+
+
+def test_passthrough_attribution_preserves_claude_code(tmp_path) -> None:
+    asyncio.run(_test_passthrough_attribution_preserves_claude_code(tmp_path / "usage.jsonl"))
+
+
+def test_url_tag_attribution(tmp_path) -> None:
+    asyncio.run(_test_url_tag_attribution(tmp_path / "usage.jsonl"))
+
+
+def test_url_tag_unknown_returns_404() -> None:
+    asyncio.run(_test_url_tag_unknown_returns_404())

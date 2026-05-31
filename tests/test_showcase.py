@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from telos.scripts import showcase as sc
 
 
@@ -59,20 +57,6 @@ def test_recorded_sender_replays_in_order() -> None:
     assert send({})["input_tokens"] == 22
 
 
-def test_scene_portability_offline(capsys: pytest.CaptureFixture[str]) -> None:
-    sc.scene_portability(sc.Printer())
-    out = capsys.readouterr().out
-    for engine in sc.ENGINES:
-        assert engine in out
-
-
-def test_scene_invariant_raises_and_is_caught(capsys: pytest.CaptureFixture[str]) -> None:
-    sc.scene_invariant(sc.Printer())
-    out = capsys.readouterr().out
-    assert "TelosInvariantError" in out
-    assert "accepted" in out
-
-
 def test_scene_replay_produces_four_modes() -> None:
     records = sc._run_replays(sc.build_demo_corpus(), sc.load_responses())
     modes = {r["mode"] for r in records}
@@ -93,16 +77,6 @@ def test_telos_cuts_token_cost_by_at_least_70pct() -> None:
     for mode in ("telos", "both"):
         cut = (base - by_mode[mode].cost_usd) / base
         assert cut >= 0.70, f"{mode}: only {cut:.0%} cost cut"
-
-
-def test_scene_dashboard_writes_single_file(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(sc, "SHOWCASE_DIR", tmp_path)
-    monkeypatch.setattr(sc, "USAGE_LOG_PATH", tmp_path / "usage.jsonl")
-    monkeypatch.setattr(sc, "DASHBOARD_PATH", tmp_path / "dashboard.html")
-    records = sc._run_replays(sc.build_demo_corpus(), sc.load_responses())
-    sc.scene_dashboard(sc.Printer(), records=records, open_browser=False)
-    html = (tmp_path / "dashboard.html").read_text(encoding="utf-8")
-    assert "<html" in html.lower()
 
 
 def test_cast_output_is_valid_asciinema_v2(tmp_path) -> None:

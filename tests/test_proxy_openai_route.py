@@ -670,33 +670,45 @@ async def _test_passthrough_html_error_becomes_json() -> None:
         await up_runner.cleanup()
 
 
-async def _run_all(tmp_log: Path) -> None:
-    await _test_openai_route_non_streaming()
-    await _test_openai_route_logs_usage(tmp_log)
-    await _test_openai_route_via_labels_harness(tmp_log)
-    await _test_openai_route_streaming()
-    await _test_unknown_slug_returns_404()
-    await _test_per_slug_upstream_url_is_honored()
-    await _test_openai_slug_in_defaults()
-    await _test_openai_responses_passthrough_streams()
-    await _test_openai_responses_logs_usage(tmp_log)
-    await _test_passthrough_html_error_becomes_json()
-    await _test_anthropic_route_still_works()
+def test_openai_route_non_streaming() -> None:
+    asyncio.run(_test_openai_route_non_streaming())
 
 
-def test_openai_proxy_route() -> None:
-    import tempfile
-    with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as f:
-        tmp_log = Path(f.name)
-    try:
-        asyncio.run(_run_all(tmp_log))
-    finally:
-        try:
-            tmp_log.unlink()
-        except FileNotFoundError:
-            pass
+def test_openai_route_logs_usage(tmp_path) -> None:
+    asyncio.run(_test_openai_route_logs_usage(tmp_path / "usage.jsonl"))
 
 
-if __name__ == "__main__":
-    test_openai_proxy_route()
-    print("\nall openai proxy route tests passed.")
+def test_openai_route_via_labels_harness(tmp_path) -> None:
+    asyncio.run(_test_openai_route_via_labels_harness(tmp_path / "usage.jsonl"))
+
+
+def test_openai_route_streaming() -> None:
+    asyncio.run(_test_openai_route_streaming())
+
+
+def test_unknown_slug_returns_404() -> None:
+    asyncio.run(_test_unknown_slug_returns_404())
+
+
+def test_per_slug_upstream_url_is_honored() -> None:
+    asyncio.run(_test_per_slug_upstream_url_is_honored())
+
+
+def test_openai_slug_in_defaults() -> None:
+    asyncio.run(_test_openai_slug_in_defaults())
+
+
+def test_openai_responses_passthrough_streams() -> None:
+    asyncio.run(_test_openai_responses_passthrough_streams())
+
+
+def test_openai_responses_logs_usage(tmp_path) -> None:
+    asyncio.run(_test_openai_responses_logs_usage(tmp_path / "usage.jsonl"))
+
+
+def test_passthrough_html_error_becomes_json() -> None:
+    asyncio.run(_test_passthrough_html_error_becomes_json())
+
+
+def test_anthropic_route_still_works() -> None:
+    asyncio.run(_test_anthropic_route_still_works())

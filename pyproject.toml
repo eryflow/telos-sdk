@@ -57,6 +57,14 @@ Changelog = "https://github.com/learningCatHD/telos-sdk/blob/main/CHANGELOG.md"
 [project.scripts]
 telos = "telos.cli:main"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "integration: spins up an aiohttp fake upstream / touches the filesystem",
+    "live: needs real API keys; skipped unless TELOS_LIVE_TESTS=1",
+]
+
 [tool.setuptools]
 # The current directory (telos-sdk/) IS the telos package itself;
 # telos.harness → ./harness/, telos.engine → ./engine/, and so on.

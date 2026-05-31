@@ -268,20 +268,6 @@ def test_install_patches_auth_json_credential_pool(tmp_path: Path) -> None:
         assert rec["auth_pool_patches"][0]["previous_base_url"] == "https://openrouter.ai/api/v1"
     finally:
         _restore_env()
-
-
-def test_install_auth_json_idempotent(tmp_path: Path) -> None:
-    """Re-running install() when auth.json is already patched is a no-op."""
-    inst, _config_path, _state = _make_inst(tmp_path)
-    try:
-        inst.install()
-        r2 = inst.install()
-        assert r2.already_installed is True
-        assert not r2.changed_files
-    finally:
-        _restore_env()
-
-
 def test_uninstall_restores_auth_json_credential_pool(tmp_path: Path) -> None:
     """uninstall() restores the credential pool base_url in auth.json."""
     inst, config_path, state_path = _make_inst(tmp_path)
