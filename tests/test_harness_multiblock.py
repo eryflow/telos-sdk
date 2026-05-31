@@ -55,14 +55,14 @@ def test_openclaw_multiple_text_blocks() -> None:
     print("✓ test_openclaw_multiple_text_blocks")
 
 
-def test_hermes_multiple_text_blocks() -> None:
-    h = load_harness("hermes")
+def test_claude_code_multiple_text_blocks() -> None:
+    h = load_harness("claude-code")
     for n in (2, 4, 13):
-        ir = h.parse(_user_with_n_text_blocks(n), session_id=f"h-{n}",
+        ir = h.parse(_user_with_n_text_blocks(n), session_id=f"cc-{n}",
                      engine="anthropic", model="claude-opus-4-7")
         _assert_band_order(ir.messages[0].blocks)
         Bridge(ir, load_engine("anthropic"))
-    print("✓ test_hermes_multiple_text_blocks")
+    print("✓ test_claude_code_multiple_text_blocks")
 
 
 def test_pins_preserved_in_source_order() -> None:
@@ -108,7 +108,7 @@ def test_user_text_then_tool_result_then_text() -> None:
 
 def main() -> None:
     test_openclaw_multiple_text_blocks()
-    test_hermes_multiple_text_blocks()
+    test_claude_code_multiple_text_blocks()
     test_pins_preserved_in_source_order()
     test_user_text_then_tool_result_then_text()
     print("\nall harness-multiblock regression tests passed.")

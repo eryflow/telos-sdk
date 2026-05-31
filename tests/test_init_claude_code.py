@@ -24,7 +24,7 @@ def test_install_on_missing_file() -> None:
     assert r.already_installed is False
     assert p in r.changed_files
     data = _read(p)
-    assert data["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:7171"
+    assert data["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:7171/_h/claude-code"
     assert data["env"]["__telos_installed"] is True
     print("✓ test_install_on_missing_file")
 
@@ -42,7 +42,7 @@ def test_install_preserves_existing_settings() -> None:
     data = _read(p)
     assert data["permissions"]["defaultMode"] == "ask"  # untouched
     assert data["env"]["FOO"] == "bar"
-    assert data["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:7171"
+    assert data["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:7171/_h/claude-code"
     print("✓ test_install_preserves_existing_settings")
 
 
@@ -53,7 +53,7 @@ def test_install_preserves_user_anthropic_base_url() -> None:
     inst = ClaudeCodeInstaller(settings_path=p, proxy_url="http://127.0.0.1:7171")
     inst.install()
     data = _read(p)
-    assert data["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:7171"
+    assert data["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:7171/_h/claude-code"
     assert data["env"]["__telos_previous_base_url"] == "https://my.proxy/"
     print("✓ test_install_preserves_user_anthropic_base_url")
 
@@ -125,10 +125,10 @@ def test_install_preserves_other_tool_with_same_url() -> None:
     """
     p = _new_settings_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    same = "http://127.0.0.1:7171"
+    same = "http://127.0.0.1:7171/_h/claude-code"
     p.write_text(json.dumps({"env": {
         "ANTHROPIC_BASE_URL": same, "__other_tool": "true"}}))
-    inst = ClaudeCodeInstaller(settings_path=p, proxy_url=same)
+    inst = ClaudeCodeInstaller(settings_path=p, proxy_url="http://127.0.0.1:7171")
     inst.install()
     data = _read(p)
     assert data["env"]["__telos_previous_base_url"] == same
@@ -152,7 +152,7 @@ def test_reinstall_with_new_url_keeps_original_previous() -> None:
     ClaudeCodeInstaller(settings_path=p, proxy_url="http://127.0.0.1:9999").install()
     data = _read(p)
     assert data["env"]["__telos_previous_base_url"] == "https://orig/"
-    assert data["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:9999"
+    assert data["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:9999/_h/claude-code"
     print("✓ test_reinstall_with_new_url_keeps_original_previous")
 
 

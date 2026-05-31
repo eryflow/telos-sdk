@@ -237,8 +237,8 @@ class CodexInstaller(AgentInstaller):
         """
         proxy = self.proxy_url.rstrip("/")
         if auth_mode == "chatgpt":
-            return f"{proxy}/upstreams/{_CHATGPT_SLUG}"
-        return f"{proxy}/upstreams/openai/v1"
+            return f"{proxy}/_h/codex/upstreams/{_CHATGPT_SLUG}"
+        return f"{proxy}/_h/codex/upstreams/openai/v1"
 
     def _ensure_chatgpt_upstream(self, result: InstallResult) -> None:
         """Register the ``codex-chatgpt`` slug in ``~/.telos/config.json`` so the
@@ -372,6 +372,15 @@ class CodexInstaller(AgentInstaller):
             result.notes.append(
                 "detected ChatGPT login (auth.json auth_mode=chatgpt); "
                 "routing through chatgpt.com/backend-api/codex."
+            )
+            result.notes.append(
+                "if your ChatGPT token later expires (Codex shows a "
+                "'token_invalidated' / 'sign in again' error), the re-login "
+                "MUST be done with the telos provider removed — the "
+                "'Sign in with ChatGPT' bootstrap probes non-API paths that, "
+                "routed through the gateway, return an HTML page and crash "
+                "Codex with \"Unexpected token '<', \"<!DOCTYPE\"...\". Workflow: "
+                "`telos uninstall --harness codex` → sign in → `telos init codex`."
             )
         elif auth_mode == "unknown":
             result.notes.append(

@@ -30,7 +30,8 @@
 12. [Comparison experiments: replay vs dual session](#12-comparison-experiments-replay-vs-dual-session)
 13. [Best practices (DO) and anti-patterns (DON'T)](#13-best-practices-do-and-anti-patterns-dont)
 14. [Troubleshooting](#14-troubleshooting)
-15. [Recommended onboarding order](#15-recommended-onboarding-order)
+15. [Q&A · Codex, ChatGPT login & harness routing](#15-qa--codex-chatgpt-login--harness-routing)
+16. [Recommended onboarding order](#16-recommended-onboarding-order)
 
 ---
 
@@ -504,6 +505,9 @@ Detailed principles and boundaries: [replay-comparison.md](replay-comparison.md)
 | `rtk` mode but the dashboard shows a `fallback:*` rule | the `rtk` binary is not installed | install the rtk binary, or accept the Python fallback |
 | Custom headers are lost | the proxy only whitelists and forwards 6 headers | modify `_FORWARD_HEADER_WHITELIST` or use Path A |
 | replay reports a missing API key | `ANTHROPIC_API_KEY` is not set | `export ANTHROPIC_API_KEY=...` or `--api-key` |
+| Codex: `Unexpected token '<', "<!DOCTYPE "... is not valid JSON` on **sign-in** | the ChatGPT login bootstrap probes non-API paths that, routed through the gateway, return a 403 HTML page (see [§15.1](#151-codex-sign-in-doctype-crash)) | sign in with the telos provider removed: `telos uninstall --harness codex` → sign in → `telos init codex` |
+| Codex: `token_invalidated` / "Please try signing in again" (HTTP 401) | the stored ChatGPT token was revoked server-side — **not** a telos bug | re-login (follow the workflow above so the bootstrap doesn't dead-end on the `<!DOCTYPE` crash) |
+| Codex traffic not in the dashboard | wrong `base_url`, or auth mode mismatch (apikey vs chatgpt) | check `~/.codex/config.toml` `base_url`; re-run `telos init codex` so it re-reads `auth.json` ([§15.2](#152-codex-apikey-vs-chatgpt-routing)) |
 
 ### 14.2 The jq health-check trio
 
@@ -523,7 +527,108 @@ Healthy = `cache_read` rising with the turn count, `cache_creation` increasing m
 
 ---
 
-## 15. Recommended onboarding order
+## 15. Q&A · Codex, ChatGPT login & harness routing
+
+Codex (the `codex` CLI and **Codex Desktop**) is wired up differently from the
+Anthropic-SDK harnesses, and its **ChatGPT login** has one sharp edge worth
+knowing before it bites you. This section is the field guide.
+
+### How Codex is routed
+
+`telos init codex` writes a `model_provider = "telos"` block into
+`~/.codex/config.toml` pointing at the gateway, and picks the route from
+`~/.codex/auth.json`:
+
+| Codex auth mode (`auth.json`) | `base_url` written to `config.toml` | Forwards to |
+|---|---|---|
+| `apikey` (`OPENAI_API_KEY`) | `http://127.0.0.1:7171/_h/codex/upstreams/openai/v1` | `api.openai.com/v1/responses` |
+| `chatgpt` (ChatGPT JWT) | `http://127.0.0.1:7171/_h/codex/upstreams/codex-chatgpt` | `chatgpt.com/backend-api/codex/responses` |
+
+The `/_h/codex/` prefix is a **harness URL tag**: the installer stamps the
+calling agent's identity into the URL so the gateway attributes traffic
+directly (no header/content guessing). Each harness gets its own tag —
+`/_h/claude-code/`, `/_h/hermes/`, `/_h/openclaw/`, `/_h/codex/`. Codex uses
+`wire_api = "responses"`, so it appends `/responses` to the `base_url`; the
+gateway passes that SSE stream through and parses the terminal `response.completed`
+event for usage so Codex shows up on the dashboard.
+
+> ChatGPT-mode requests go to `chatgpt.com/backend-api/codex`, **not**
+> `api.openai.com` — the ChatGPT JWT is scoped to that backend and
+> `api.openai.com` rejects it with a 403 "Missing scopes". That is why the
+> installer registers a separate `codex-chatgpt` upstream.
+
+### 15.1 Codex sign-in DOCTYPE crash
+
+**Symptom.** During **"Sign in with ChatGPT"**, Codex dies with
+`Unexpected token '<', "<!DOCTYPE "... is not valid JSON`.
+
+**Root cause.** The OAuth flow itself goes straight to `auth.openai.com` and
+does not touch the gateway — but the **login bootstrap** afterwards pokes
+non-`/responses` paths (the bare `base_url`, `/me`, …). Routed through the
+telos provider, those hit `chatgpt.com/backend-api/codex/<path>`, which the
+codex backend answers with a **403 `<!DOCTYPE html>` page**. Codex runs
+`JSON.parse()` on that HTML and crashes on the first `<`. In short: **the
+ChatGPT sign-in flow can't complete cleanly while `model_provider = telos` is
+active.** (This is inherent to routing a custom provider — it is *not* caused
+by the `/_h/` URL tag; the older un-tagged `base_url` had the same edge.)
+
+**Fix — sign in with the provider removed, then re-attach:**
+
+```bash
+telos uninstall --harness codex     # reverts config.toml to Codex's built-in openai provider
+#   → in Codex, "Sign in with ChatGPT" now talks to the real OpenAI endpoints
+#     and writes a fresh ~/.codex/auth.json
+telos init codex                    # re-reads auth.json (auth_mode=chatgpt) and re-wires the route
+#   → restart Codex Desktop
+```
+
+After that, Codex's `/responses` calls carry a valid token, the gateway
+forwards them to `chatgpt.com/backend-api/codex/responses`, and you get `200`s.
+
+**Hardening (since the HTML-guard landed).** The gateway now detects a non-2xx
+HTML body on the passthrough and rewrites it into a parseable JSON error that
+names this exact workflow — so a stale token no longer dead-ends on a raw
+`<!DOCTYPE` crash, it surfaces an actionable message instead. Note this only
+takes effect after the **gateway process is restarted** onto the new code
+(`telos proxy` restart) — a long-running daemon keeps serving the old behavior.
+
+### 15.2 Codex apikey vs chatgpt routing
+
+The two auth modes route to **different upstreams**, so a mode change after
+install leaves a stale `base_url`. If you switch logins (e.g. log out of an API
+key and sign in with ChatGPT, or vice-versa), **re-run `telos init codex`** so
+it re-reads `auth.json` and rewrites the matching `base_url`. Symptoms of a
+mismatch: 403 "Missing scopes" (ChatGPT JWT sent to `api.openai.com`) or
+`token_invalidated` (expired/revoked token).
+
+### 15.3 Confirm Codex traffic is actually flowing through the gateway
+
+```bash
+# 1) The config points at the gateway:
+grep -A4 'model_providers.telos' ~/.codex/config.toml      # base_url should contain /_h/codex/
+
+# 2) Requests are landing (real client UA is "Codex Desktop/..." or "codex/..."):
+grep 'codex' ~/.telos/gateway.log | tail
+
+# 3) Outcomes: a successful /responses leaves NO "upstream 4xx/5xx" WARNING line.
+#    A token problem shows e.g.  upstream 401 ... "token_invalidated"
+grep -E 'upstream [0-9]{3}' ~/.telos/gateway.log | tail
+```
+
+On the dashboard, Codex traffic is grouped under the harness label **`codex`**
+(set via the upstream's `via = "codex"`), not the wire-level default.
+
+### 15.4 When in doubt: fully reset Codex
+
+```bash
+telos uninstall --harness codex     # revert config.toml + drop the codex-chatgpt upstream
+# (optional) rm ~/.codex/auth.json  # force a clean re-login
+telos init codex                    # re-detect auth mode and re-wire
+```
+
+---
+
+## 16. Recommended onboarding order
 
 ```mermaid
 flowchart LR

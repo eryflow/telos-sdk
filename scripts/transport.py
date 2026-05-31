@@ -52,21 +52,21 @@ PRESETS: dict[str, HarnessPreset] = {
         api_key_env="ANTHROPIC_API_KEY",
         description="OpenClaw agent — Anthropic /v1/messages wire, explicit cache breakpoints",
     ),
+    "claude-code": HarnessPreset(
+        harness_name="claude-code",
+        engine_name="anthropic",
+        wire_protocol="anthropic",
+        default_base_url=None,
+        api_key_env="ANTHROPIC_API_KEY",
+        description="Claude Code — Anthropic /v1/messages wire with system-reminder / command envelope tags",
+    ),
     "hermes": HarnessPreset(
         harness_name="hermes",
         engine_name="anthropic",
         wire_protocol="anthropic",
         default_base_url=None,
         api_key_env="ANTHROPIC_API_KEY",
-        description="Claude Code (Hermes) — Anthropic /v1/messages wire with envelope tags",
-    ),
-    "claude-code": HarnessPreset(
-        harness_name="hermes",
-        engine_name="anthropic",
-        wire_protocol="anthropic",
-        default_base_url=None,
-        api_key_env="ANTHROPIC_API_KEY",
-        description="Alias for hermes — Claude Code harness",
+        description="Hermes-CLI — Anthropic /v1/messages wire (independent of Claude Code as of 2026-05)",
     ),
 }
 

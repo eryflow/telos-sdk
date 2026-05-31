@@ -34,7 +34,7 @@ def test_install_adds_provider_and_preserves_previous(tmp_path: Path) -> None:
     assert 'model_provider = "telos"' in text
     assert '# telos_previous_model_provider = model_provider = "openai"' in text
     assert "[model_providers.telos]" in text
-    assert 'base_url = "http://127.0.0.1:7171/upstreams/openai/v1"' in text
+    assert 'base_url = "http://127.0.0.1:7171/_h/codex/upstreams/openai/v1"' in text
     assert 'wire_api = "responses"' in text
     assert 'requires_openai_auth = true' in text
     assert text.index('model_provider = "telos"') < text.index("[projects.")
@@ -139,7 +139,7 @@ def test_install_chatgpt_mode_routes_to_backend_codex(tmp_path: Path) -> None:
         text = config.read_text(encoding="utf-8")
 
         # codex points at the chatgpt slug, NOT at /upstreams/openai/v1.
-        assert 'base_url = "http://127.0.0.1:7171/upstreams/codex-chatgpt"' in text, text
+        assert 'base_url = "http://127.0.0.1:7171/_h/codex/upstreams/codex-chatgpt"' in text, text
         assert "/upstreams/openai/v1" not in text
 
         # The telos config now has a codex-chatgpt slug pointing at backend-api/codex.
@@ -224,7 +224,7 @@ def test_install_tolerates_missing_trailing_newline(tmp_path: Path) -> None:
         "# >>> telos managed codex provider\n"
         "[model_providers.telos]\n"
         'name = "TELOS Gateway"\n'
-        'base_url = "http://127.0.0.1:7171/upstreams/openai/v1"\n'
+        'base_url = "http://127.0.0.1:7171/_h/codex/upstreams/openai/v1"\n'
         'wire_api = "responses"\n'
         "requires_openai_auth = true\n"
         "# <<< telos managed codex provider"  # no trailing newline!
@@ -255,7 +255,7 @@ def test_install_preserves_foreign_content_inside_provider_block(tmp_path: Path)
         "\n"
         "[model_providers.telos]\n"
         'name = "TELOS Gateway"\n'
-        'base_url = "http://127.0.0.1:7171/upstreams/openai/v1"\n'
+        'base_url = "http://127.0.0.1:7171/_h/codex/upstreams/openai/v1"\n'
         'wire_api = "responses"\n'
         "requires_openai_auth = true\n"
         "\n"

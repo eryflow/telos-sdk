@@ -44,8 +44,8 @@ def _assert_tool_result_first(msg, where: str) -> None:
             f"{where}: tool_result not contiguous-at-front: {kinds}"
 
 
-def test_hermes_tool_result_stays_first() -> None:
-    harness = load_harness("hermes")
+def test_claude_code_tool_result_stays_first() -> None:
+    harness = load_harness("claude-code")
     ir = harness.parse(_CLAUDE_CODE_REQ, session_id="r-h",
                         engine="anthropic", model="claude-opus-4-7")
     assert_ir_invariants(ir)  # §5 invariant must hold
@@ -54,10 +54,10 @@ def test_hermes_tool_result_stays_first() -> None:
     # tool_result must be the first block -- a hard constraint of the Anthropic protocol
     assert user_msg.blocks[0].kind == "tool_result", \
         f"first block must be tool_result, got {[b.kind for b in user_msg.blocks]}"
-    _assert_tool_result_first(user_msg, "hermes user_msg")
+    _assert_tool_result_first(user_msg, "claude-code user_msg")
     # tool_result is still the FOLD band (band membership is unchanged, only the physical order)
     assert user_msg.blocks[0].band is Band.FOLD
-    print("✓ test_hermes_tool_result_stays_first")
+    print("✓ test_claude_code_tool_result_stays_first")
 
 
 def test_openclaw_tool_result_stays_first() -> None:
@@ -92,7 +92,7 @@ def test_wire_user_message_leads_with_tool_result() -> None:
 
 def test_bridge_accepts_reordered_message() -> None:
     """Bridge construction should not raise TelosInvariantError."""
-    harness = load_harness("hermes")
+    harness = load_harness("claude-code")
     engine = load_engine("anthropic")
     ir = harness.parse(_CLAUDE_CODE_REQ, session_id="r-b",
                         engine="anthropic", model="claude-opus-4-7")
@@ -124,7 +124,7 @@ def test_deeply_interleaved_content() -> None:
             ],
         }],
     }
-    harness = load_harness("hermes")
+    harness = load_harness("claude-code")
     ir = harness.parse(req, session_id="r-d", engine="anthropic")
     assert_ir_invariants(ir)
 
@@ -139,7 +139,7 @@ def test_deeply_interleaved_content() -> None:
 
 
 def main() -> None:
-    test_hermes_tool_result_stays_first()
+    test_claude_code_tool_result_stays_first()
     test_openclaw_tool_result_stays_first()
     test_wire_user_message_leads_with_tool_result()
     test_bridge_accepts_reordered_message()

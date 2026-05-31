@@ -56,15 +56,9 @@ async def _test_bad_label_rejected() -> None:
     print("✓ test_bad_label_rejected")
 
 
-def test_control_mode() -> None:
+def test_get_then_post() -> None:
     asyncio.run(_test_get_then_post())
+
+
+def test_bad_label_rejected() -> None:
     asyncio.run(_test_bad_label_rejected())
-
-
-def main() -> None:
-    test_control_mode()
-    print("\nall gateway control-mode tests passed.")
-
-
-if __name__ == "__main__":
-    main()

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "telos-sdk"
-version = "0.1.6"
+version = "0.1.7"
 description = "TELOS SDK: a cache-aware prompt protocol and gateway for portable agent context."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -56,6 +56,14 @@ Changelog = "https://github.com/learningCatHD/telos-sdk/blob/main/CHANGELOG.md"
 
 [project.scripts]
 telos = "telos.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "integration: spins up an aiohttp fake upstream / touches the filesystem",
+    "live: needs real API keys; skipped unless TELOS_LIVE_TESTS=1",
+]
 
 [tool.setuptools]
 # The current directory (telos-sdk/) IS the telos package itself;

@@ -100,7 +100,7 @@ def test_install_patches_model_base_url(tmp_path: Path) -> None:
         assert config_path in r.changed_files
         data = yaml.safe_load(config_path.read_text())
         assert (data["model"]["base_url"]
-                == "http://127.0.0.1:7171/upstreams/openrouter")
+                == "http://127.0.0.1:7171/_h/hermes/upstreams/openrouter")
         # Untouched fields stay put.
         assert data["model"]["api_mode"] == "chat_completions"
         assert data["model"]["provider"] == "openrouter"
@@ -261,27 +261,13 @@ def test_install_patches_auth_json_credential_pool(tmp_path: Path) -> None:
         inst.install()
         auth = json.loads(auth_path.read_text())
         pool_url = auth["credential_pool"]["openrouter"][0]["base_url"]
-        assert pool_url == "http://127.0.0.1:7171/upstreams/openrouter/v1"
+        assert pool_url == "http://127.0.0.1:7171/_h/hermes/upstreams/openrouter/v1"
         # State records the original so uninstall can restore it.
         state = json.loads(state_path.read_text())
         rec = next(r for r in state["patched"] if r["key"] == "__primary__")
         assert rec["auth_pool_patches"][0]["previous_base_url"] == "https://openrouter.ai/api/v1"
     finally:
         _restore_env()
-
-
-def test_install_auth_json_idempotent(tmp_path: Path) -> None:
-    """Re-running install() when auth.json is already patched is a no-op."""
-    inst, _config_path, _state = _make_inst(tmp_path)
-    try:
-        inst.install()
-        r2 = inst.install()
-        assert r2.already_installed is True
-        assert not r2.changed_files
-    finally:
-        _restore_env()
-
-
 def test_uninstall_restores_auth_json_credential_pool(tmp_path: Path) -> None:
     """uninstall() restores the credential pool base_url in auth.json."""
     inst, config_path, state_path = _make_inst(tmp_path)

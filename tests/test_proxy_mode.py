@@ -273,27 +273,29 @@ async def _test_no_record_disables_corpus(corpus_dir: Path) -> None:
         await up_runner.cleanup()
 
 
-async def _run_all(tmp_log: Path, corpus_dir: Path) -> None:
-    await _test_mode_rtk_shrinks_tool_result()
-    await _test_mode_none_is_byte_identical()
-    await _test_mode_telos_marks_cache_control()
-    await _test_compare_group_and_reduction_logged(tmp_log)
-    await _test_mode_is_sticky_per_session()
-    await _test_proxy_records_corpus(corpus_dir)
-    await _test_no_record_disables_corpus(corpus_dir)
+def test_mode_rtk_shrinks_tool_result() -> None:
+    asyncio.run(_test_mode_rtk_shrinks_tool_result())
 
 
-def test_proxy_mode() -> None:
-    """pytest entry point: run the whole suite in a single event loop."""
-    import tempfile
-    with tempfile.TemporaryDirectory() as td:
-        asyncio.run(_run_all(Path(td) / "usage.jsonl", Path(td) / "corpus"))
+def test_mode_none_is_byte_identical() -> None:
+    asyncio.run(_test_mode_none_is_byte_identical())
 
 
-def main() -> None:
-    test_proxy_mode()
-    print("\nall proxy mode tests passed.")
+def test_mode_telos_marks_cache_control() -> None:
+    asyncio.run(_test_mode_telos_marks_cache_control())
 
 
-if __name__ == "__main__":
-    main()
+def test_compare_group_and_reduction_logged(tmp_path) -> None:
+    asyncio.run(_test_compare_group_and_reduction_logged(tmp_path / "usage.jsonl"))
+
+
+def test_mode_is_sticky_per_session() -> None:
+    asyncio.run(_test_mode_is_sticky_per_session())
+
+
+def test_proxy_records_corpus(tmp_path) -> None:
+    asyncio.run(_test_proxy_records_corpus(tmp_path / "corpus"))
+
+
+def test_no_record_disables_corpus(tmp_path) -> None:
+    asyncio.run(_test_no_record_disables_corpus(tmp_path / "corpus"))

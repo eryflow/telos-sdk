@@ -1,111 +1,107 @@
-"""Unit tests for harness preset / alias support (no network).
+"""Unit tests for harness preset support (no network).
 
 Covers:
-- alias resolution in ``registry.canonical_harness`` / ``load_harness``
+- ``load_harness`` resolves each canonical name to its independent plugin
 - factory construction of each ``TelosTransport`` preset (no requests sent)
-- the proxy pipeline normalizing ``result.harness`` when an alias is passed as ``harness_name``
+- dashboard display names
+
+Aliases were removed in 2026-05 (Claude Code and Hermes split into separate
+plugins/installers). This file no longer tests alias resolution.
 """
 
 from __future__ import annotations
 
 import os
 
-from telos import PRESETS, HarnessPreset, TelosTransport
+from telos.harness.claude_code import ClaudeCodePlugin
 from telos.harness.hermes import HermesPlugin
 from telos.harness.openclaw import OpenClawPlugin
 from telos.proxy.pipeline import process_anthropic_request
-from telos.registry import canonical_harness, harness_display_name, load_harness
+from telos.registry import harness_display_name, load_harness
+from telos.scripts.transport import PRESETS, TelosTransport
 
 
-_HERMES_REQ = {
-    "model": "claude-opus-4-7",
-    "max_tokens": 1024,
-    "system": [{"type": "text",
-                "text": "You are Claude Code. <system-reminder>cwd=/repo</system-reminder>"}],
-    "messages": [
-        {"role": "user", "content": [{"type": "text", "text": "Fix bug"}]},
-    ],
-}
+# Provide a fake API key for transport construction. The transport never
+# actually sends a request in these tests; we only verify factory plumbing.
+os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
 
 
-def test_canonical_harness_resolves_aliases() -> None:
-    assert canonical_harness("claude-code") == "hermes"
-    # non-aliases are returned unchanged
-    assert canonical_harness("openclaw") == "openclaw"
-    assert canonical_harness("hermes") == "hermes"
-    assert canonical_harness("telos") == "telos"
-    print("✓ test_canonical_harness_resolves_aliases")
-
-
-def test_load_harness_accepts_aliases() -> None:
-    assert isinstance(load_harness("claude-code"), HermesPlugin)
+def test_load_harness_returns_independent_plugins() -> None:
+    assert isinstance(load_harness("claude-code"), ClaudeCodePlugin)
+    assert isinstance(load_harness("hermes"), HermesPlugin)
     assert isinstance(load_harness("openclaw"), OpenClawPlugin)
-    print("✓ test_load_harness_accepts_aliases")
+    # Each is a *distinct* class — no alias collapsing.
+    assert type(load_harness("claude-code")) is not type(load_harness("hermes"))
+    print("✓ test_load_harness_returns_independent_plugins")
 
 
 def test_harness_display_name() -> None:
-    # canonical name → friendly display name
-    assert harness_display_name("hermes") == "Claude Code"
-    assert harness_display_name("openclaw") == "OpenClaw"
-    assert harness_display_name("telos") == "Telos"
-    # aliases are normalized first, then mapped
     assert harness_display_name("claude-code") == "Claude Code"
-    # a non-harness name (proxy's pseudo-harness) is returned unchanged
+    assert harness_display_name("hermes") == "Hermes"
+    assert harness_display_name("openclaw") == "OpenClaw"
+    assert harness_display_name("codex") == "Codex"
+    # Unknown / sentinel names pass through unchanged so the dashboard can
+    # surface anonymous or untagged traffic without a lookup miss.
     assert harness_display_name("passthrough") == "passthrough"
-    assert harness_display_name("rtk-only") == "rtk-only"
     assert harness_display_name("?") == "?"
-    assert harness_display_name("") == ""
     print("✓ test_harness_display_name")
 
 
-def test_presets_cover_all_harnesses() -> None:
+def test_load_harness_rejects_unknown() -> None:
+    try:
+        load_harness("does-not-exist")
+    except ValueError as e:
+        assert "Unknown harness plugin" in str(e)
+        print("✓ test_load_harness_rejects_unknown")
+        return
+    raise AssertionError("expected ValueError for unknown harness")
+
+
+def test_preset_table_has_independent_entries() -> None:
+    """Each preset name maps to a distinct ``harness_name`` (no alias coupling)."""
     assert set(PRESETS) == {"openclaw", "hermes", "claude-code"}
-    for name, preset in PRESETS.items():
-        assert isinstance(preset, HarnessPreset)
-        assert preset.wire_protocol == "anthropic"
-        assert preset.description
-    # claude-code is an alias preset of hermes
-    assert PRESETS["claude-code"].harness_name == "hermes"
-    print("✓ test_presets_cover_all_harnesses")
+    assert PRESETS["claude-code"].harness_name == "claude-code"
+    assert PRESETS["hermes"].harness_name == "hermes"
+    assert PRESETS["openclaw"].harness_name == "openclaw"
+    print("✓ test_preset_table_has_independent_entries")
 
 
-def test_transport_for_harness_builds_each_preset() -> None:
-    # no network request is sent; only verifies the construction path + that the duck interface is wired correctly.
-    os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
-
+def test_transport_for_harness_constructs_each_preset() -> None:
     for name in ("openclaw", "hermes", "claude-code"):
         t = TelosTransport.for_harness(name)
-        assert hasattr(t, "messages"), f"{name} should expose the Anthropic interface"
-        assert t.preset.wire_protocol == "anthropic"
-    print("✓ test_transport_for_harness_builds_each_preset")
+        assert t.preset.harness_name == name
+        # Sanity-check the inner transport is reachable.
+        assert t.messages is not None
+    print("✓ test_transport_for_harness_constructs_each_preset")
 
 
-def test_transport_for_harness_rejects_unknown() -> None:
-    try:
-        TelosTransport.for_harness("does-not-exist")
-    except ValueError as e:
-        assert "does-not-exist" in str(e)
-    else:
-        raise AssertionError("an unknown harness should raise ValueError")
-    print("✓ test_transport_for_harness_rejects_unknown")
-
-
-def test_pipeline_canonicalizes_alias_override() -> None:
-    # the caller passes the alias claude-code; result.harness should be normalized to hermes,
-    # ensuring the usage log / dashboard stay consistent with the auto-detected hermes.
+def test_pipeline_claude_code_harness_name_kept() -> None:
+    """Passing ``harness_name="claude-code"`` is no longer normalized away —
+    the canonical name flows straight into ``result.harness``."""
+    req = {
+        "model": "claude-opus-4-7",
+        "max_tokens": 16,
+        "system": [{"type": "text", "text": "hi"}],
+        "messages": [{"role": "user",
+                      "content": [{"type": "text", "text": "x"}]}],
+    }
     r = process_anthropic_request(
-        _HERMES_REQ, session_id="t-alias", harness_name="claude-code",
+        req, session_id="t-cc-name", harness_name="claude-code",
     )
-    assert r.harness == "hermes"
-    print("✓ test_pipeline_canonicalizes_alias_override")
+    assert r.harness == "claude-code", \
+        f"expected 'claude-code', got {r.harness!r}"
+    print("✓ test_pipeline_claude_code_harness_name_kept")
+
+
+def main() -> None:
+    test_load_harness_returns_independent_plugins()
+    test_harness_display_name()
+    test_load_harness_rejects_unknown()
+    test_preset_table_has_independent_entries()
+    test_transport_for_harness_constructs_each_preset()
+    test_pipeline_claude_code_harness_name_kept()
+    print("\nall harness preset tests passed.")
 
 
 if __name__ == "__main__":
-    test_canonical_harness_resolves_aliases()
-    test_load_harness_accepts_aliases()
-    test_harness_display_name()
-    test_presets_cover_all_harnesses()
-    test_transport_for_harness_builds_each_preset()
-    test_transport_for_harness_rejects_unknown()
-    test_pipeline_canonicalizes_alias_override()
-    print("all harness-preset tests passed")
+    main()

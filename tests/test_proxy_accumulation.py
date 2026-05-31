@@ -166,15 +166,9 @@ async def _test_different_sessions_dont_share_state(tmp_log: Path) -> None:
         await up_runner.cleanup()
 
 
-def main() -> None:
-    with tempfile.TemporaryDirectory() as td:
-        log1 = Path(td) / "growth.jsonl"
-        asyncio.run(_test_cumulative_growth_through_proxy(log1))
-    with tempfile.TemporaryDirectory() as td:
-        log2 = Path(td) / "iso.jsonl"
-        asyncio.run(_test_different_sessions_dont_share_state(log2))
-    print("\nall proxy accumulation tests passed.")
+def test_cumulative_growth_through_proxy(tmp_path) -> None:
+    asyncio.run(_test_cumulative_growth_through_proxy(tmp_path / "usage.jsonl"))
 
 
-if __name__ == "__main__":
-    main()
+def test_different_sessions_dont_share_state(tmp_path) -> None:
+    asyncio.run(_test_different_sessions_dont_share_state(tmp_path / "usage.jsonl"))

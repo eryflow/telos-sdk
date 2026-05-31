@@ -78,10 +78,10 @@ def test_install_subset_top_and_one_provider(tmp_path: Path) -> None:
         data = yaml.safe_load(config_path.read_text())
         # Top-level patched.
         assert (data["model"]["base_url"]
-                == "http://127.0.0.1:7171/upstreams/openrouter")
+                == "http://127.0.0.1:7171/_h/hermes/upstreams/openrouter")
         # aiclaudexyz patched.
         assert (data["providers"]["aiclaudexyz"]["model"]["base_url"]
-                == "http://127.0.0.1:7171/upstreams/aiclaudexyz")
+                == "http://127.0.0.1:7171/_h/hermes/upstreams/aiclaudexyz")
         # anthropic_direct untouched.
         assert (data["providers"]["anthropic_direct"]["model"]["base_url"]
                 == "https://api.anthropic.com")
@@ -125,9 +125,9 @@ def test_incremental_install_merges_state(tmp_path: Path) -> None:
         inst2.install()
         data = yaml.safe_load(config_path.read_text())
         assert (data["model"]["base_url"]
-                == "http://127.0.0.1:7171/upstreams/openrouter")
+                == "http://127.0.0.1:7171/_h/hermes/upstreams/openrouter")
         assert (data["providers"]["aiclaudexyz"]["model"]["base_url"]
-                == "http://127.0.0.1:7171/upstreams/aiclaudexyz")
+                == "http://127.0.0.1:7171/_h/hermes/upstreams/aiclaudexyz")
         state = json.loads(state_path.read_text())
         keys = sorted(r["key"] for r in state["patched"])
         assert keys == ["__primary__", "aiclaudexyz"]
@@ -159,7 +159,7 @@ def test_state_v1_backward_compat(tmp_path: Path) -> None:
     """
     config_path = tmp_path / "config.yaml"
     cfg = _multi_route_cfg()
-    cfg["model"]["base_url"] = "http://127.0.0.1:7171/upstreams/openrouter"
+    cfg["model"]["base_url"] = "http://127.0.0.1:7171/_h/hermes/upstreams/openrouter"
     _write_yaml(config_path, cfg)
 
     state_path = tmp_path / "state.json"
@@ -167,7 +167,7 @@ def test_state_v1_backward_compat(tmp_path: Path) -> None:
         "version": 1,
         "provider_id": "openrouter",
         "previous_base_url": "https://openrouter.ai/api/v1",
-        "gateway_route_url": "http://127.0.0.1:7171/upstreams/openrouter",
+        "gateway_route_url": "http://127.0.0.1:7171/_h/hermes/upstreams/openrouter",
     }))
 
     os.environ["TELOS_HOME"] = str(tmp_path / "telos-home")

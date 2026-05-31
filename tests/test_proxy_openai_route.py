@@ -612,32 +612,103 @@ async def _test_anthropic_route_still_works() -> None:
         await up_runner.cleanup()
 
 
-async def _run_all(tmp_log: Path) -> None:
-    await _test_openai_route_non_streaming()
-    await _test_openai_route_logs_usage(tmp_log)
-    await _test_openai_route_via_labels_harness(tmp_log)
-    await _test_openai_route_streaming()
-    await _test_unknown_slug_returns_404()
-    await _test_per_slug_upstream_url_is_honored()
-    await _test_openai_slug_in_defaults()
-    await _test_openai_responses_passthrough_streams()
-    await _test_openai_responses_logs_usage(tmp_log)
-    await _test_anthropic_route_still_works()
+async def _test_passthrough_html_error_becomes_json() -> None:
+    """A non-2xx HTML page from the upstream (e.g. chatgpt.com's 403
+    ``<!DOCTYPE html>`` for a non-API path that Codex's login bootstrap pokes)
+    must be converted into a parseable JSON error, so the OpenAI-wire client
+    surfaces it instead of crashing on ``JSON.parse("<!DOCTYPE …")``.
+    """
+    async def html_403(request: web.Request) -> web.Response:
+        return web.Response(
+            status=403,
+            content_type="text/html",
+            text="<!DOCTYPE html><html><body>Forbidden</body></html>",
+        )
 
+    up_app = web.Application()
+    # A non-/responses path that the upstream answers with HTML — mirrors
+    # chatgpt.com/backend-api/codex/me returning a 403 login page.
+    up_app.router.add_get("/me", html_403)
+    up_runner = web.AppRunner(up_app)
+    await up_runner.setup()
+    up_site = web.TCPSite(up_runner, "127.0.0.1", 0)
+    await up_site.start()
+    up_port = up_site._server.sockets[0].getsockname()[1]
+    up_url = f"http://127.0.0.1:{up_port}"
 
-def test_openai_proxy_route() -> None:
-    import tempfile
-    with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as f:
-        tmp_log = Path(f.name)
+    upstreams = {
+        "codex-chatgpt": UpstreamConfig(
+            url=up_url, engine="openai", protocol="openai-chat", via="codex",
+        ),
+    }
+    app = make_app(upstream="http://unused", upstreams=upstreams)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    px_port = site._server.sockets[0].getsockname()[1]
+    px_url = f"http://127.0.0.1:{px_port}"
+
     try:
-        asyncio.run(_run_all(tmp_log))
+        async with aiohttp.ClientSession() as client:
+            async with client.get(
+                f"{px_url}/upstreams/codex-chatgpt/me",
+                headers={"authorization": "Bearer sk-test"},
+            ) as resp:
+                # Status is preserved …
+                assert resp.status == 403
+                # … but the body is now JSON, not HTML.
+                ct = resp.headers.get("content-type", "")
+                assert "application/json" in ct, ct
+                body = await resp.json()  # must not raise
+                assert body["error"]["type"] == "invalid_request_error"
+                assert "HTML page" in body["error"]["message"]
+                assert "telos uninstall" in body["error"]["message"]
+        print("✓ test_passthrough_html_error_becomes_json")
     finally:
-        try:
-            tmp_log.unlink()
-        except FileNotFoundError:
-            pass
+        await runner.cleanup()
+        await up_runner.cleanup()
 
 
-if __name__ == "__main__":
-    test_openai_proxy_route()
-    print("\nall openai proxy route tests passed.")
+def test_openai_route_non_streaming() -> None:
+    asyncio.run(_test_openai_route_non_streaming())
+
+
+def test_openai_route_logs_usage(tmp_path) -> None:
+    asyncio.run(_test_openai_route_logs_usage(tmp_path / "usage.jsonl"))
+
+
+def test_openai_route_via_labels_harness(tmp_path) -> None:
+    asyncio.run(_test_openai_route_via_labels_harness(tmp_path / "usage.jsonl"))
+
+
+def test_openai_route_streaming() -> None:
+    asyncio.run(_test_openai_route_streaming())
+
+
+def test_unknown_slug_returns_404() -> None:
+    asyncio.run(_test_unknown_slug_returns_404())
+
+
+def test_per_slug_upstream_url_is_honored() -> None:
+    asyncio.run(_test_per_slug_upstream_url_is_honored())
+
+
+def test_openai_slug_in_defaults() -> None:
+    asyncio.run(_test_openai_slug_in_defaults())
+
+
+def test_openai_responses_passthrough_streams() -> None:
+    asyncio.run(_test_openai_responses_passthrough_streams())
+
+
+def test_openai_responses_logs_usage(tmp_path) -> None:
+    asyncio.run(_test_openai_responses_logs_usage(tmp_path / "usage.jsonl"))
+
+
+def test_passthrough_html_error_becomes_json() -> None:
+    asyncio.run(_test_passthrough_html_error_becomes_json())
+
+
+def test_anthropic_route_still_works() -> None:
+    asyncio.run(_test_anthropic_route_still_works())
