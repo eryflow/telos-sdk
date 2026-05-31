@@ -16,12 +16,23 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-4FB3BF?style=flat-square)](pyproject.toml)
 [![Status](https://img.shields.io/badge/status-Beta-d8851f?style=flat-square)](CHANGELOG.md)
 [![Protocol](https://img.shields.io/badge/protocol-TELOS%20IR-7FD8E0?style=flat-square)](docs/2026-05-06-telos-protocol.md)
+[![Version](https://img.shields.io/badge/version-0.1.7-4FB3BF?style=flat-square)](CHANGELOG.md)
 
 [**Quickstart**](#quickstart) · [**Support Matrix**](#support-matrix) · [**Why**](#why-telos) · [**Benchmark**](#benchmark) · [**Protocol**](#protocol) · [**Roadmap**](#roadmap) · [**Citation**](#citation)
 
 <sub>📖 &nbsp;**English** · [Simplified Chinese](README.zh-CN.md)</sub>
 
 </div>
+
+* * *
+
+**News** 🔥
+
+* **[2026.05.31]** [v0.1.7](CHANGELOG.md) — `telos status` / `telos uninstall` / `telos version` CLI commands; Codex HTML passthrough guard; cache TTL ordering fix; CI matrix expanded to Python 3.10–3.13.
+* **[2026.05.29]** [v0.1.6](CHANGELOG.md) — `telos init` now auto-restarts the gateway when a new harness upstream is registered, eliminating the manual `telos gateway restart` step.
+* **[2026.05.27]** [v0.1.4](CHANGELOG.md) — Codex.app (ChatGPT login mode) is now a first-class harness; installer auto-detects `auth_mode` and routes through the correct upstream.
+
+* * *
 
 ---
 
@@ -217,7 +228,7 @@ TELOS makes exactly one claim: **context is yours, agents are hired.** The curre
 
 ## Citation
 
-Core contributors: Zheng Wang, Shenzhi Wang, Yue Wu, Shiji Song, Gao Huang
+Core contributors: Zheng Wang, Shenzhi Wang, HongTao Zhong, Shiji Song, Gao Huang
 
 ```
 @misc{wang2026telos-agent,
