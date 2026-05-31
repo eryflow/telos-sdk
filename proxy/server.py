@@ -2178,6 +2178,12 @@ async def _access_log_middleware(request: web.Request, handler):  # type: ignore
     return await handler(request)
 
 
+# aiohttp >= 3.9 deprecates bare-string application keys (NotAppKeyWarning).
+# Use a typed AppKey so the stored ProxyApp handle stays accessible without the
+# warning. ProxyApp is defined above; the key is module-level for reuse.
+PROXY_APP_KEY = web.AppKey("proxy", ProxyApp)
+
+
 def make_app(
     *,
     upstream: str = _DEFAULT_UPSTREAM,
@@ -2229,7 +2235,7 @@ def make_app(
     app.router.add_get("/__telos/developer.json", proxy.handle_developer_json)
     app.router.add_route("*", "/{tail:.*}", proxy.handle_passthrough)
     app.on_shutdown.append(proxy.on_shutdown)
-    app["proxy"] = proxy
+    app[PROXY_APP_KEY] = proxy
     return app
 
 

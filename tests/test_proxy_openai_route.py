@@ -9,7 +9,10 @@ verifies:
 - streaming SSE forwards chunks and extracts usage from the terminal chunk
   when ``stream_options.include_usage=true``;
 - unknown upstream slugs return a 404 error;
-- per-slug upstream URL is honored (legacy ``self.upstream`` is NOT used).
+- per-slug upstream URL is honored (legacy ``self.upstream`` is NOT used);
+- the ``/_h/<harness>/upstreams/<slug>/...`` URL tag attributes the usage log
+  to the calling harness (hermes / openclaw / codex) and overrides the slug's
+  ``via``.
 """
 
 from __future__ import annotations
@@ -248,6 +251,52 @@ async def _test_openai_route_via_labels_harness(tmp_log: Path) -> None:
         # The crucial assertion: harness is the via name, not "telos".
         assert record["harness"] == "openclaw"
         print("✓ test_openai_route_via_labels_harness")
+    finally:
+        await px_runner.cleanup()
+        await up_runner.cleanup()
+
+
+async def _test_openai_tag_attributes_each_harness(tmp_log: Path) -> None:
+    """On the OpenAI-chat path, the ``/_h/<harness>/upstreams/<slug>/...`` URL
+    tag is the authoritative attribution: every supported OpenAI harness
+    (hermes / openclaw / codex) is recorded under its own name, and the tag
+    wins even when the slug also carries a ``via`` default. This exercises the
+    URL-tag branch of ``_handle_openai_chat`` (the anthropic-path equivalent is
+    covered by ``test_url_tag_attribution`` in test_proxy_server.py)."""
+    mock = _MockOpenAIUpstream(sse=False)
+    up_runner, up_url = await _start_upstream(mock)
+    # The slug carries via="telos"; the URL tag must override it per request.
+    extra = {
+        "deepseek": UpstreamConfig(
+            url=up_url, engine="deepseek", protocol="openai-chat",
+            via="telos",
+        ),
+    }
+    px_runner, px_url = await _start_proxy(up_url, usage_log=tmp_log,
+                                            extra_slugs=extra)
+    try:
+        async with aiohttp.ClientSession() as client:
+            for harness in ("hermes", "openclaw", "codex"):
+                mock.last_body = None
+                async with client.post(
+                    f"{px_url}/_h/{harness}/upstreams/deepseek/v1/chat/completions",
+                    json=_sample_chat_request(),
+                    headers={"authorization": "Bearer k",
+                             "x-telos-session": f"tag-{harness}"},
+                ) as resp:
+                    assert resp.status == 200, await resp.text()
+                # The tagged request reached the right upstream …
+                assert mock.last_path == "/v1/chat/completions"
+                # … and the usage log attributes it to the URL tag — not "telos"
+                # (the slug's via) and not the wire-level default.
+                record = json.loads(
+                    tmp_log.read_text().strip().splitlines()[-1])
+                assert record["session_id"] == f"tag-{harness}"
+                assert record["harness"] == harness, (
+                    f"URL tag {harness!r} should win over via='telos', "
+                    f"got {record['harness']!r}"
+                )
+        print("✓ test_openai_tag_attributes_each_harness")
     finally:
         await px_runner.cleanup()
         await up_runner.cleanup()
@@ -680,6 +729,10 @@ def test_openai_route_logs_usage(tmp_path) -> None:
 
 def test_openai_route_via_labels_harness(tmp_path) -> None:
     asyncio.run(_test_openai_route_via_labels_harness(tmp_path / "usage.jsonl"))
+
+
+def test_openai_tag_attributes_each_harness(tmp_path) -> None:
+    asyncio.run(_test_openai_tag_attributes_each_harness(tmp_path / "usage.jsonl"))
 
 
 def test_openai_route_streaming() -> None:
