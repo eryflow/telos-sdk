@@ -1,0 +1,81 @@
+---
+title: "Multi-turn State Accumulation"
+description: "How TELOS carries the ref-pool and refresh counters across turns — and how to observe the accumulation."
+icon: "arrows-rotate"
+---
+
+Ref-pool persistence and R8 adaptive refresh both depend on **cross-turn state accumulation**. This is
+what makes cache hit rate a monotonically non-decreasing function of session length.
+
+## Where the state lives
+
+```python
+@dataclass
+class BridgeSessionState:
+    refpool: RefPool          # ref-pool slug registry (kept across turns once frozen, kept across folds)
+    stats: _SessionStats      # cumulative_cache_creation + real_requests_since_refresh
+    sticky_harness: str | None = None   # harness identified on turn 1, locked and reused
+    sticky_mode: str | None = None      # mode of turn 1 (none/telos/rtk/both), locked
+    compare_group: str | None = None    # comparison-experiment grouping label
+```
+
+`REFRESH_THRESHOLD = 11`: **R8 adaptive gating** — if the number of real requests within the renewal
+window is below the threshold, `refresh` is skipped, letting the cache expire naturally and avoiding a
+renewal cost greater than its benefit for low-activity sessions.
+
+## Held automatically on Path A (SDK)
+
+A `TelosAnthropicTransport` / `TelosOpenAITransport` instance equals one session. `__init__` creates a
+`BridgeSessionState` internally; each `_do_create` passes it to `Bridge`, and on response
+`bridge.absorb_usage(...)` accumulates the cache_creation.
+
+```python
+transport.session_state.stats.cumulative_cache_creation
+```
+
+## Held automatically on Path B (proxy), keyed by session-id
+
+Inside the proxy, `_SessionRegistry` (an OrderedDict LRU, default 10000) holds the state keyed by
+session_id. The session_id derivation priority:
+
+1. the `x-telos-session` HTTP header (explicit override),
+2. `metadata.user_id` (an Anthropic SDK built-in field),
+3. `blake2b(api_key + system + tools + messages[0])` → `telos-<16 hex>`.
+
+So the N turns of one conversation (only appending to the tail of `messages[]`) → the **same**
+session_id; a different initial prompt → a different one; two users with different API keys → different
+ones. Once the LRU cap is exceeded the oldest session is evicted, with an INFO log.
+
+## Observing accumulation
+
+`usage_log` adds a `cumulative` block per line:
+
+```json
+{
+  "session_id": "telos-46bbb9d3d3df581e",
+  "call_index": 4,
+  "harness": "openclaw",
+  "normalized": {"raw_input": 50, "cache_read": 6500, "cache_write": 0, "output": 5},
+  "cumulative": {
+    "cache_creation": 6500,
+    "real_requests_since_refresh": 4,
+    "refpool_slugs": ["system-doc-1"]
+  }
+}
+```
+
+<Check>
+  `cache_creation` increasing monotonically shows accumulation is working. The `refpool_slugs` array
+  should **not** grow repeatedly across turns — the same document should not be registered again and
+  again.
+</Check>
+
+## Disabling accumulation
+
+Not passing `session_state`, or restarting the proxy, makes the behavior fall back to a fresh `Bridge`
+per turn. This was the default before 1.0, and it does not break wire bytes — you simply lose the
+cross-turn ref-pool and counters.
+
+<Card title="Observability" icon="chart-line" href="/en/observability/savings-dashboard">
+  Watch the accumulated cache reads turn into dollars.
+</Card>

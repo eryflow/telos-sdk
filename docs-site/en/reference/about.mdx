@@ -1,0 +1,68 @@
+---
+title: "About & Citation"
+description: "Who builds TELOS, the license, and how to cite the protocol and the SWE-bench study."
+icon: "quote-left"
+---
+
+TELOS is built by [LEAP Lab @ Tsinghua University](https://www.leaplab.ai/) — a research group focused
+on machine learning, multimodal learning, and embodied intelligence.
+
+## Thesis
+
+TELOS makes exactly one claim: **context is yours, agents are hired.** `TelosIR` is an engine-agnostic,
+serializable, portable context representation — your persona, your tools, your 20-turn mid-session
+thread, all packed onto the same stone tablet. Hand it to Claude today, move it to DeepSeek tomorrow,
+run it on a local vLLM tonight.
+
+## Roadmap
+
+| Phase | Thesis |
+|---|---|
+| **Phase 1** · Protocol correctness hardening | Turn "cache cannot be invalidated" from a slogan into a CI red/green light |
+| **Phase 2** · Production reliability & observability | Make the gateway safe to leave on someone else's prod traffic |
+| **Phase 3** · Take over the call chain | Go from prompt rewriter to the agent's traffic plane |
+| **Phase 4** · Context becomes an asset | Trajectories are no longer logs — they're forkable code |
+
+## License
+
+The core is **Apache 2.0**.
+
+## Contributors
+
+Zheng Wang · Shenzhi Wang · HongTao Zhong · Shiji Song · Gao Huang
+
+## Citation
+
+Cite the protocol:
+
+```bibtex
+@misc{wang2026telos-agent,
+  title        = {Telos: A Cost-Aware Inference Infrastructure for AI Agent},
+  author       = {Zheng Wang, Shenzhi Wang, HongTao Zhong, Shiji Song, Gao Huang},
+  howpublished = {\url{https://github.com/learningCatHD/telos-sdk.git}},
+  year         = {2026}
+}
+```
+
+Cite the [SWE-bench Verified A/B study](/en/benchmark/swebench):
+
+```bibtex
+@misc{wang2026telos-swebench,
+  title  = {Without Trading Resolution for Tokens:
+            A Pre-Registered SWE-bench Verified A/B Study of the TELOS Protocol},
+  author = {Wang, Zheng and Wang, Shenzhi and Zhong, HongTao and
+            Song, Shiji and Huang, Gao},
+  year   = {2026},
+  howpublished = {LEAP Lab Technical Report, Tsinghua University},
+  url    = {https://github.com/learningCatHD/telos-sdk}
+}
+```
+
+<CardGroup cols={2}>
+  <Card title="GitHub" icon="github" href="https://github.com/learningCatHD/telos-sdk">
+    Star the repo, file issues, read the source.
+  </Card>
+  <Card title="LEAP Lab" icon="building-columns" href="https://www.leaplab.ai/">
+    The research group behind TELOS.
+  </Card>
+</CardGroup>

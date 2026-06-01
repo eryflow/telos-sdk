@@ -1,0 +1,75 @@
+---
+title: "多轮状态累积"
+description: "TELOS 如何跨轮携带 ref-pool 与刷新计数器——以及如何观察累积。"
+icon: "arrows-rotate"
+---
+
+ref-pool 持久化与 R8 自适应刷新都依赖**跨轮状态累积**。正是它让 cache 命中率成为会话长度的单调不下降函数。
+
+## 状态存在哪
+
+```python
+@dataclass
+class BridgeSessionState:
+    refpool: RefPool          # ref-pool slug 注册表（冻结后跨轮保留，跨折叠保留）
+    stats: _SessionStats      # cumulative_cache_creation + real_requests_since_refresh
+    sticky_harness: str | None = None   # 第 1 轮识别的 harness，锁定复用
+    sticky_mode: str | None = None      # 第 1 轮的 mode（none/telos/rtk/both），锁定
+    compare_group: str | None = None    # 对比实验分组标签
+```
+
+`REFRESH_THRESHOLD = 11`：**R8 自适应门控**——若续约窗口内的真实请求数低于阈值，则跳过 `refresh`，让
+cache 自然过期，避免低活跃会话续约成本大于收益。
+
+## 路径 A（SDK）自动持有
+
+一个 `TelosAnthropicTransport` / `TelosOpenAITransport` 实例等于一个会话。`__init__` 内部创建一个
+`BridgeSessionState`；每次 `_do_create` 把它传给 `Bridge`，响应返回时 `bridge.absorb_usage(...)` 累积
+cache_creation。
+
+```python
+transport.session_state.stats.cumulative_cache_creation
+```
+
+## 路径 B（代理）按 session-id 自动持有
+
+代理内部，`_SessionRegistry`（OrderedDict LRU，默认 10000）按 session_id 持有状态。session_id 推导优先级：
+
+1. `x-telos-session` HTTP 头（显式覆盖），
+2. `metadata.user_id`（Anthropic SDK 内建字段），
+3. `blake2b(api_key + system + tools + messages[0])` → `telos-<16 hex>`。
+
+于是同一对话的 N 轮（只在 `messages[]` 尾部追加）→ **同一个** session_id；不同初始 prompt → 不同；两个不同
+API key 的用户 → 不同。超过 LRU 上限时驱逐最旧会话，并打 INFO 日志。
+
+## 观察累积
+
+`usage_log` 每行增加一个 `cumulative` 块：
+
+```json
+{
+  "session_id": "telos-46bbb9d3d3df581e",
+  "call_index": 4,
+  "harness": "openclaw",
+  "normalized": {"raw_input": 50, "cache_read": 6500, "cache_write": 0, "output": 5},
+  "cumulative": {
+    "cache_creation": 6500,
+    "real_requests_since_refresh": 4,
+    "refpool_slugs": ["system-doc-1"]
+  }
+}
+```
+
+<Check>
+  `cache_creation` 单调增长说明累积在工作。`refpool_slugs` 数组**不应**跨轮反复增长——同一文档不应被一再
+  注册。
+</Check>
+
+## 关闭累积
+
+不传 `session_state`，或重启代理，会回退到每轮新建一个 `Bridge`。这是 1.0 之前的默认，且不破坏 wire
+字节——你只是失去跨轮的 ref-pool 与计数器。
+
+<Card title="可观测性" icon="chart-line" href="/zh/observability/savings-dashboard">
+  看累积的缓存读取如何变成美元。
+</Card>

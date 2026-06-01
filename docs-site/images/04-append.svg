@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 380" role="img" aria-label="单调追加：缓存命中率随会话长度单调非递减">
+  <rect width="880" height="380" fill="#FAFEFF"/>
+  <text x="440" y="36" text-anchor="middle" font-family="Georgia, serif" font-size="18" fill="#1A3F44" font-weight="bold">单调追加 · 老字节不变，新内容只往尾巴加</text>
+  <text x="440" y="56" text-anchor="middle" font-family="Helvetica, Arial" font-size="12" fill="#555">于是 prefix-matching 在每一轮都能找到最长公共前缀 —— 不是靠运气，是构造而成</text>
+
+  <!-- Four turns -->
+  <g font-family="ui-monospace, Menlo, monospace" font-size="13">
+    <g transform="translate(80,100)">
+      <text x="0" y="14" fill="#555">t₁</text>
+      <rect x="40"  y="0" width="80" height="26" fill="#7FD8E0"/>
+      <text x="80" y="18" text-anchor="middle" fill="#0E2A2E">PIN₁</text>
+      <rect x="124" y="0" width="80" height="26" fill="#7FD8E0"/>
+      <text x="164" y="18" text-anchor="middle" fill="#0E2A2E">PIN₂</text>
+      <rect x="208" y="0" width="80" height="26" fill="#7FD8E0"/>
+      <text x="248" y="18" text-anchor="middle" fill="#0E2A2E">PIN₃</text>
+    </g>
+    <g transform="translate(80,144)">
+      <text x="0" y="14" fill="#555">t₂</text>
+      <rect x="40"  y="0" width="80" height="26" fill="#7FD8E0"/>
+      <text x="80" y="18" text-anchor="middle" fill="#0E2A2E">PIN₁</text>
+      <rect x="124" y="0" width="80" height="26" fill="#7FD8E0"/>
+      <text x="164" y="18" text-anchor="middle" fill="#0E2A2E">PIN₂</text>
+      <rect x="208" y="0" width="80" height="26" fill="#7FD8E0"/>
+      <text x="248" y="18" text-anchor="middle" fill="#0E2A2E">PIN₃</text>
+      <rect x="296" y="0" width="92" height="26" fill="#4FB3BF"/>
+      <text x="342" y="18" text-anchor="middle" fill="#FFFFFF">FOLD₁</text>
+    </g>
+    <g transform="translate(80,188)">
+      <text x="0" y="14" fill="#555">t₃</text>
+      <rect x="40"  y="0" width="80" height="26" fill="#7FD8E0"/>
+      <text x="80" y="18" text-anchor="middle" fill="#0E2A2E">PIN₁</text>
+      <rect x="124" y="0" width="80" height="26" fill="#7FD8E0"/>
+      <text x="164" y="18" text-anchor="middle" fill="#0E2A2E">PIN₂</text>
+      <rect x="208" y="0" width="80" height="26" fill="#7FD8E0"/>
+      <text x="248" y="18" text-anchor="middle" fill="#0E2A2E">PIN₃</text>
+      <rect x="296" y="0" width="92" height="26" fill="#4FB3BF"/>
+      <text x="342" y="18" text-anchor="middle" fill="#FFFFFF">FOLD₁</text>
+      <rect x="392" y="0" width="92" height="26" fill="#4FB3BF"/>
+      <text x="438" y="18" text-anchor="middle" fill="#FFFFFF">FOLD₂</text>
+    </g>
+    <g transform="translate(80,232)">
+      <text x="0" y="14" fill="#555">t₄</text>
+      <rect x="40"  y="0" width="80" height="26" fill="#7FD8E0"/>
+      <text x="80" y="18" text-anchor="middle" fill="#0E2A2E">PIN₁</text>
+      <rect x="124" y="0" width="80" height="26" fill="#7FD8E0"/>
+      <text x="164" y="18" text-anchor="middle" fill="#0E2A2E">PIN₂</text>
+      <rect x="208" y="0" width="80" height="26" fill="#7FD8E0"/>
+      <text x="248" y="18" text-anchor="middle" fill="#0E2A2E">PIN₃</text>
+      <rect x="296" y="0" width="92" height="26" fill="#4FB3BF"/>
+      <text x="342" y="18" text-anchor="middle" fill="#FFFFFF">FOLD₁</text>
+      <rect x="392" y="0" width="92" height="26" fill="#4FB3BF"/>
+      <text x="438" y="18" text-anchor="middle" fill="#FFFFFF">FOLD₂</text>
+      <rect x="488" y="0" width="92" height="26" fill="#4FB3BF"/>
+      <text x="534" y="18" text-anchor="middle" fill="#FFFFFF">FOLD₃</text>
+      <rect x="588" y="0" width="100" height="26" fill="#d8851f"/>
+      <text x="638" y="18" text-anchor="middle" fill="#FFFFFF">DROP₁</text>
+    </g>
+  </g>
+
+  <!-- Pointers -->
+  <g font-family="Helvetica, Arial" font-size="11">
+    <line x1="164" y1="270" x2="164" y2="290" stroke="#2C5F66" stroke-width="1.5"/>
+    <polygon points="164,290 159,282 169,282" fill="#2C5F66"/>
+    <text x="164" y="306" text-anchor="middle" fill="#2C5F66">↑ 这一段永远不变</text>
+
+    <line x1="638" y1="270" x2="638" y2="290" stroke="#d8851f" stroke-width="1.5"/>
+    <polygon points="638,290 633,282 643,282" fill="#d8851f"/>
+    <text x="638" y="306" text-anchor="middle" fill="#d8851f">↑ 这一段不进 hash</text>
+  </g>
+
+  <!-- Conclusion -->
+  <g transform="translate(440,340)" font-family="Helvetica, Arial" font-size="13" text-anchor="middle">
+    <text fill="#1A3F44" font-weight="bold">缓存命中率 = 会话长度的<tspan fill="#2C5F66">单调非递减</tspan>函数 —— 会话越长，命中越多，绝不倒退。</text>
+  </g>
+</svg>

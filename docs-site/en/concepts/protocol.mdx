@@ -1,0 +1,122 @@
+---
+title: "The TELOS Protocol"
+description: "Not compression, but never breaking the prefix. The one structural rule that wins the KV cache."
+icon: "sparkles"
+---
+
+## The core idea
+
+Most agent frameworks treat the KV cache as a runtime gift the inference engine may or may not give
+you. TELOS inverts this:
+
+<Note>
+  **Cache reuse is a structural property of the prompt itself, not a matter of runtime luck. If you
+  never touch bytes already submitted, the cache *cannot* be invalidated.**
+</Note>
+
+An LLM's KV cache retains the computed results of recurring prefixes; on a hit, the input token price
+drops to ~10% (Anthropic). But an agent's multi-turn conversations are by default **not**
+cache-friendly: the slightest jitter in the concatenation order of the system prompt, tool
+definitions, and conversation history — JSON keys out of order, the tool array reordered, a timestamp
+mixed into the prefix — changes the prefix hash, and the entire cache is invalidated.
+
+The whole value of TELOS is one sentence: **stabilize the parts that are genuinely stable, so they
+keep hitting the KV cache.** Everything else is implementation detail.
+
+## The "stone tablet" metaphor
+
+TELOS = **S**table prefix · **T**iered bands · **E**phemeral tail · **L**ayered adapters ·
+**A**nchored marks.
+
+The inscription on the base of a stone tablet (the durable prefix) is carved once and used for a
+lifetime; the inscriptions added on top over time (new content each round) can be erased and rewritten
+at any time, but never touch the base. The entire value of the KV cache is to keep the base preserved.
+
+## Three interlocking ideas
+
+### 1. Three-color bands
+
+Every content block declares its cache lifetime **at birth** — not post-hoc heuristics, not LLM
+guessing, but first-class structural annotation.
+
+<Frame>
+  <img src="/images/03-banding.en.svg" alt="PIN / FOLD / DROP bands" />
+</Frame>
+
+| Band | Color | Semantics | Cache behavior |
+|---|:---:|---|---|
+| **PIN** | 🟢 | Tool defs · system prompt · current question | Permanent. Never evicted. The immutable base of every request's prefix hash. |
+| **FOLD** | 🟡 | Conversation history · tool results · large docs | Cacheable, compactable. Under pressure, replaced by a summary — PIN prefix bytes stay untouched. |
+| **DROP** | 🔴 | Timestamps · CWD · git status · PIDs | Ephemeral. **Excluded entirely from the prefix hash.** Never contaminates upstream bytes. |
+
+The ordering invariant is absolute: **PIN\* → FOLD\* → DROP\*** — within each message, across the
+full prompt, at every layer. This is the **only** structural rule that wins the cache. Read the full
+treatment in [Three-color bands](/en/concepts/bands).
+
+### 2. Monotonic append
+
+The prompt is an **append-only stream**. New turns only add blocks to the tail — **no mutation of
+already-submitted bytes**. A "modification" is expressed as a new block (a summary, a redaction),
+never an in-place rewrite.
+
+<Frame caption="Cache hit rate is a monotonically non-decreasing function of session length.">
+  <img src="/images/04-append.en.svg" alt="Monotonic append" />
+</Frame>
+
+Because earlier blocks are immutable and bytes are identical across turns, the inference engine's
+prefix-matching algorithm finds the longest common prefix on **every** request — not by luck, but by
+construction. **Cache hit rate is therefore a monotonically non-decreasing function of session
+length: longer sessions, more reuse, never regression.**
+
+### 3. Prefix-hash exclusion of DROP
+
+When the prefix hash is computed, all DROP blocks are structurally excluded. A timestamp or git
+status changing every turn can never push the PIN bytes to a different byte offset, because DROP
+content sits after every cache breakpoint and is never part of the hashed prefix.
+
+## The three invariants, formally
+
+Let a prompt be a finite sequence of blocks $P = (b_1, \dots, b_n)$, each assigned a type
+$\tau(b_i) \in \{\text{PIN}, \text{FOLD}, \text{DROP}\}$ with the partial order
+PIN $\prec$ FOLD $\prec$ DROP.
+
+<CardGroup cols={3}>
+  <Card title="I1 · Ordering">
+    For all $i < j$, $\tau(b_i) \preceq \tau(b_j)$. Blocks are physically arranged pin\* → fold\* → drop\*.
+  </Card>
+  <Card title="I2 · Monotonic append">
+    Advancing from turn $t$ to $t+1$, the bytes submitted through turn $t$ are a **prefix** of the
+    bytes submitted at turn $t+1$.
+  </Card>
+  <Card title="I3 · Prefix-hash exclusion">
+    All DROP blocks are excluded from the prefix-hash computation.
+  </Card>
+</CardGroup>
+
+**Proposition.** If a prompt sequence satisfies I1, I2, and I3, then under any prefix-matching cache
+strategy the inference engine applies, the cache hit rate is a **monotonically non-decreasing**
+function of session length.
+
+I1 is a *sufficient condition* for I2: if a high-variability DROP block appears before a PIN block,
+the PIN bytes shift to a different offset whenever the DROP content changes, breaking the prefix
+relation. That is why the band ordering is not a convention but a necessary part of the invariant
+itself.
+
+## Versus existing practice
+
+| Practice | I1 | I2 | I3 |
+|---|:---:|:---:|:---:|
+| Naive chat completion, system rewritten each turn | ✗ | ✗ | ✗ |
+| LangChain `ConversationBuffer` | ✗ | ✓ | ✗ |
+| Anthropic `cache_control` breakpoints | partial | ✓ | ✗ |
+| OpenAI `prompt_cache_key` | partial | ✓ | ✗ |
+| **TELOS** | ✓ | ✓ | ✓ |
+
+Commercial breakpoint mechanisms can activate the cache *given* byte stability, but they do not
+themselves enforce I1 and I3 — any harness that inserts a timestamp into the PIN region silently
+breaks the cache, and the engine never raises an error. TELOS lifts this **silent failure** to an
+explicit, statically checkable protocol constraint.
+
+<Card title="Next: Three-color bands" icon="layer-group" href="/en/concepts/bands">
+  The data structure behind PIN / FOLD / DROP and the §5 ordering check.
+</Card>

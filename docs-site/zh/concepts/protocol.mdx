@@ -1,0 +1,105 @@
+---
+title: "TELOS 协议"
+description: "不是压缩，而是永不破坏前缀。赢得 KV cache 的那一条结构性规则。"
+icon: "sparkles"
+---
+
+## 核心思想
+
+多数 agent 框架把 KV cache 当作推理引擎"也许会赏给你"的运行时礼物。TELOS 把它反转：
+
+<Note>
+  **缓存复用是 prompt 本身的结构性属性，而非运行时的运气。只要你绝不触碰已提交的字节，cache 就*无法*被
+  失效。**
+</Note>
+
+LLM 的 KV cache 保留了"重复前缀"的计算结果；一旦命中，输入 token 单价降到约 10%（Anthropic）。但 agent
+的多轮对话默认**不**缓存友好：system prompt、工具定义、对话历史在拼接顺序上的轻微抖动——JSON
+键序乱了、工具数组顺序变了、时间戳混进了前缀——都会改变 prefix hash，使整段缓存失效。
+
+TELOS 的全部价值一句话：**稳住真正稳定的部分，让它持续命中 KV cache。** 其余都是实现细节。
+
+## "石碑"隐喻
+
+TELOS = **S**table prefix（稳定前缀）· **T**iered bands（分层带）· **E**phemeral tail（瞬时尾部）·
+**L**ayered adapters（分层适配）· **A**nchored marks（锚定标记）。
+
+石碑底座的铭文（持久前缀）一次刻成、用一辈子；其上随时间叠加的刻字（每轮新内容）可随时擦写，但绝不碰底座。
+KV cache 的全部价值，就是保住底座不变。
+
+## 三个相互咬合的想法
+
+### 1. 三色带
+
+每个内容块在**出生时**就声明其缓存生命周期——不是事后启发式，不是 LLM 猜测，而是一级结构化注解。
+
+<Frame>
+  <img src="/images/03-banding.svg" alt="PIN / FOLD / DROP 三色带" />
+</Frame>
+
+| 带 | 颜色 | 语义 | 缓存行为 |
+|---|:---:|---|---|
+| **PIN** | 🟢 | 工具定义 · system prompt · 当前问题 | 永久。永不驱逐。每个请求 prefix hash 的不可变基底。 |
+| **FOLD** | 🟡 | 对话历史 · 工具结果 · 大文档 | 可缓存、可压缩。压力下被摘要替换——PIN 前缀字节保持不变。 |
+| **DROP** | 🔴 | 时间戳 · CWD · git status · PID | 瞬时。**完全排除在 prefix hash 之外。** 绝不污染上游字节。 |
+
+排序不变量是绝对的：**PIN\* → FOLD\* → DROP\***——在每条消息内、跨整个 prompt、在每一层。这是赢得 cache
+的**唯一**结构性规则。完整内容见[三色带](/zh/concepts/bands)。
+
+### 2. 单调追加
+
+prompt 是一个**只追加的流**。新轮次只在尾部加块——**绝不修改已提交的字节**。"修改"被表达为一个新块
+（摘要、删节），而非原地重写。
+
+<Frame caption="cache 命中率是会话长度的单调不下降函数。">
+  <img src="/images/04-append.svg" alt="单调追加" />
+</Frame>
+
+因为更早的块不可变、字节跨轮一致，推理引擎的前缀匹配算法在**每一次**请求都能找到最长公共前缀——不靠运气，
+而靠构造。**因此 cache 命中率是会话长度的单调不下降函数：会话越长，复用越多，永不回退。**
+
+### 3. prefix-hash 排除 DROP
+
+计算 prefix hash 时，所有 DROP 块被结构性排除。每轮变化的时间戳或 git status 永远无法把 PIN
+字节推到不同的字节偏移，因为 DROP 内容位于每个缓存断点之后，绝不进入被 hash 的前缀。
+
+## 三个不变量，形式化
+
+设 prompt 是块的有限序列 $P = (b_1, \dots, b_n)$，每块被赋予类型
+$\tau(b_i) \in \{\text{PIN}, \text{FOLD}, \text{DROP}\}$，偏序 PIN $\prec$ FOLD $\prec$ DROP。
+
+<CardGroup cols={3}>
+  <Card title="I1 · 排序">
+    对所有 $i < j$，$\tau(b_i) \preceq \tau(b_j)$。块物理排布为 pin\* → fold\* → drop\*。
+  </Card>
+  <Card title="I2 · 单调追加">
+    从轮 $t$ 推进到 $t+1$ 时，前 $t$ 轮提交的字节是 $t+1$ 轮提交字节的 **prefix**。
+  </Card>
+  <Card title="I3 · prefix-hash 排除">
+    所有 DROP 块被排除在 prefix-hash 计算之外。
+  </Card>
+</CardGroup>
+
+**命题。** 若 prompt 序列满足 I1、I2、I3，则推理引擎采用任何前缀匹配缓存策略时，cache
+命中率作为会话长度的函数是**单调不下降**的。
+
+I1 是 I2 的*充分条件*：若高可变性的 DROP 块出现在 PIN 之前，则 PIN 字节会随 DROP
+内容变化而移到不同偏移，破坏 prefix 关系。这就是为什么三色带顺序不是惯例，而是不变量本身的必要部分。
+
+## 与既有实践的对比
+
+| 实践 | I1 | I2 | I3 |
+|---|:---:|:---:|:---:|
+| 朴素 chat completion，每轮重写 system | ✗ | ✗ | ✗ |
+| LangChain `ConversationBuffer` | ✗ | ✓ | ✗ |
+| Anthropic `cache_control` breakpoints | 部分 | ✓ | ✗ |
+| OpenAI `prompt_cache_key` | 部分 | ✓ | ✗ |
+| **TELOS** | ✓ | ✓ | ✓ |
+
+商用 breakpoint 机制能在*字节稳定*的前提下激活 cache，但它们本身不强制 I1 与 I3——任何在 PIN
+区域插入时间戳的 harness 都会悄悄破坏 cache，而引擎不会报错。TELOS 把这种**沉默失败**提升为显式、可静态
+检查的协议约束。
+
+<Card title="下一步：三色带" icon="layer-group" href="/zh/concepts/bands">
+  PIN / FOLD / DROP 背后的数据结构与 §5 排序检查。
+</Card>

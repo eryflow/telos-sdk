@@ -1,0 +1,51 @@
+---
+title: "Replay 与对比"
+description: "录制真实会话并在不同模式下重放以度量节省——受控、廉价、轨迹稳定。"
+icon: "rotate-right"
+---
+
+如何在不付两次完整 agent 跑的钱的前提下证明 TELOS 省钱？你**录制**一次真实会话，然后在不同模式下**重放**
+字节相同的轮序，只度量计费。
+
+## corpus
+
+代理默认把每次调用的**原始请求**录到 `~/.telos/corpus/<session>.jsonl`——只录请求，不录响应（Anthropic
+无状态；第 N 轮请求已包含前 N−1 轮的全部内容）。
+
+```bash
+telos replay --list                # 列出已录会话
+```
+
+- `--no-record` 关闭录制；`--corpus-dir` 改目录。
+- 函数：`record_call` / `load_session` / `list_sessions`。
+
+## 受控重放
+
+```bash
+telos replay --session <id> --modes none telos rtk both
+```
+
+`replay_session(turns, mode, ...)` 在给定模式下重放真实会话：字节相同的轮序 → RTK 过滤（若
+`mode.rtk`）→ TELOS 流水线（若 `mode.telos`）→ 以 `max_tokens=1` 发往上游 → 只取 usage。
+
+<Note>
+  **为何 `max_tokens=1`** —— 只度量 prefill / 缓存计费；输出生成被刻意阉割，使对比隔离出 prompt 侧成本。
+</Note>
+
+**缓存隔离。** 默认为每个模式在 system 段最前注入一个唯一前缀 `[telos-replay ns=<session>/<mode>]`，使
+Anthropic 侧缓存彼此独立——防止先重放的模式为后者预热缓存而被"白嫖"。结果追加到 `usage_log`，带
+`compare_group = <原会话 id>` 与 `replay: true`。
+
+## replay vs 双会话
+
+| | 成本 | 受控变量 | 适合的论断 |
+|---|---|---|---|
+| **replay** | 1 次真实会话 + 廉价 prefill | 好（轮次固定）| "对给定工作负载，token 账单降 X" |
+| **双会话** | N×K 次完整会话 | 差（轨迹分叉）| "用 TELOS，agent 整体更便宜" |
+
+replay 是在固定工作负载上得到诚实、可复现节省数字的工具。[SWE-bench A/B](/zh/benchmark/swebench)
+是双会话方法，用于证明正确率不回归。
+
+<Card title="SWE-bench Verified A/B" icon="flask" href="/zh/benchmark/swebench">
+  在真实 GitHub issue 上的预先登记双臂研究。
+</Card>

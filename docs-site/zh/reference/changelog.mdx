@@ -1,0 +1,93 @@
+---
+title: "更新日志"
+description: "telos-sdk 的用户可见变更。格式遵循 Keep a Changelog；日期为绝对日期。"
+icon: "clock-rotate-left"
+---
+
+<Update label="0.1.7" description="2026-05-31">
+  **新增**
+  - **`telos status`** —— 一处显示网关运行状态、各 harness 安装状态与实时流量（`--json` 机器可读）。
+  - **`telos uninstall`** —— 从探测到的（或指定的）harness 移除代理注入并恢复原配置。
+  - **`telos version` / `telos -V`** —— 打印已安装 SDK 版本。
+
+  **修复**
+  - 在非默认端口或自定义 `ANTHROPIC_BASE_URL` 后面时，`telos status` / `telos uninstall` 的网关 URL 解析。
+  - **Claude TTL 块排序** —— 在部分工具密集会话中 `ttl: "1h"` 块被排在 `ephemeral`（5m）块之后，违反
+    Anthropic 排序并触发 HTTP 400。已在 `AnthropicAdapter.plan_marks` 中强制 long-before-short 不变量修复。
+  - **Codex HTML 透传守卫** —— `/v1/responses` 上游现把意外的 HTML 错误响应（如 403 Cloudflare 页）转为结构化 JSON。
+  - uninstall / harness CLI 加固（部分配置、外部改写、拼写建议）。
+
+  **变更**
+  - 测试套件 228 → 272（全绿）：refpool slug 冻结不变量、bridge 规范化确定性、Anthropic BP-trim 优先级。
+  - CI 矩阵现于每次 push/PR 跑 Python 3.10 / 3.11 / 3.12 / 3.13。
+</Update>
+
+<Update label="0.1.6" description="2026-05-29">
+  **修复**
+  - **`telos init` 现在会在安装器注册新上游时重启网关。** 此前向运行中的守护进程添加一个 slug（如
+    `codex-chatgpt`）后，请求会一直 404 报 `unknown upstream slug`，直到手动 `telos gateway restart`。
+    `init/__main__.py` 现检测到配置变更并调用 `daemon.restart()`。
+</Update>
+
+<Update label="0.1.5" description="2026-05-28">
+  **变更**
+  - 实时看板与 replay 对比分离——区分实时网关流量与 A/B replay 结果，刷新品牌。
+
+  **修复**
+  - uninstall 正确移除 Codex / Hermes / OpenClaw harness 配置；各自的安装方法更新。
+</Update>
+
+<Update label="0.1.4" description="2026-05-27">
+  Codex（`wire_api = "responses"`）成为网关上的一等 harness。
+
+  **修复**
+  - **Codex.app 用 ChatGPT 登录无法到达网关** —— 安装器原假设 API-key 提供方。现读取 `~/.codex/auth.json`，
+    当 `auth_mode = "chatgpt"` 时改走新的 `codex-chatgpt` 上游，指向 `https://chatgpt.com/backend-api/codex`。
+    API-key 模式不变。
+
+  **新增**
+  - **看板显示 Codex 流量** —— Responses-API 端点解析终结的 `response.completed` SSE 事件并归一化 usage；
+    `registry.py` 加入 `codex` 显示名。
+</Update>
+
+<Update label="0.1.3" description="2026-05-22">
+  发布到 PyPI 的补丁版：版本号提升、元数据刷新、README 头部加入 LEAP Lab 署名（英文与中文）。
+</Update>
+
+<Update label="0.1.x" description="2026-05-18 · 网关重构">
+  把 `proxy` 升级为"网关 + 多 harness 管理器"：一条命令安装、一条命令集成，裸 `telos` 直接进入你常用的 harness。
+
+  **新增**
+  - **`telos init`（无参数）**、**`telos gateway start|stop|status|restart`**、裸
+    **`telos` / `telos <harness>`**、**`telos alias`**、**`telos mode`**（热重载）、**`telos dashboard`**、
+    **`~/.telos/config.json`**、回环控制端点 `GET/POST /__telos/control/mode`，以及 Homebrew formula 模板。
+
+  **变更**
+  - 对用户把 `proxy` 重命名为**网关**（`telos proxy` 保留为隐藏别名）；`--agent` → `--harness`，
+    `--proxy-url` → `--gateway-url`；新增 codex / openclaw / hermes 安装器。
+</Update>
+
+<Update label="0.1.x" description="2026-05-14 · 代理 + 跨轮状态">
+  两个主题：**零侵入集成路径（HTTP 反向代理）** 与 **真正的跨轮状态累积**。
+
+  **新增**
+  - **`telos.output_filter`** —— 带 `TelosMode` 四态开关的 RTK 风格工具结果过滤。
+  - **`telos.corpus`** + **`telos.replay`** —— 录制真实会话并按模式重放以做受控对比。
+  - **`telos.proxy`** —— 带 LRU 会话注册表的 aiohttp SSE 感知 Anthropic 反向代理。
+  - **`telos.init`** —— agent 配置注入器（Claude Code / generic）。
+  - **`TelosAnthropicTransport`**、**`BridgeSessionState`**、**`Bridge.emit_with_plan()`**、
+    **`RefPool.register_or_skip`**、**`ir.enforce_band_order`**、稳定的内容派生 session-id，以及可观察的
+    `cumulative` 累积字段。8 个新测试套件（45 个函数）。
+
+  **修复**
+  - 多块 user 消息的 harness §5 排序违反；一个跳过 `_canonicalize_ir` 的规范化 bug（悄悄破坏前缀缓存）；
+    多轮 Bridge 状态总被清零；代理 500 风暴（现降级为透传；`--strict` 恢复 500）；代理日志噪声。
+</Update>
+
+<Update label="0.1.0" description="2026-05-06 · 首个公开版本">
+  - TELOS 协议的 Python 参考实现。
+  - 3 个 harness 插件（`openclaw` / `hermes` / `telos`）；5 个引擎适配器（`anthropic` / `openai` /
+    `deepseek` / `vllm` / `sglang`）。
+  - `Bridge` 5 个原语；vLLM / SGLang 的 `BidirectionalEngineAdapter` mixin；`TelosOpenAITransport`；覆盖
+    R1–R8 修复点的 `test_smoke.py`。
+</Update>

@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 140" width="460" height="140" role="img" aria-label="TELOS — Portable Agent Context">
+  <title>TELOS</title>
+  <style>
+    .wm     { fill: #1F4A50; }
+    .tg     { fill: #5E8186; }
+    .stone  { stroke: #1F4A50; }
+    .feet   { fill: #2C5F66; }
+    @media (prefers-color-scheme: dark) {
+      .wm    { fill: #EAF7F9; }
+      .tg    { fill: #82A6AB; }
+      .stone { stroke: #EAF7F9; }
+      .feet  { fill: #4FB3BF; }
+    }
+  </style>
+
+  <defs>
+    <!-- the tablet's body: arched-top stele, flat base -->
+    <clipPath id="telos-body">
+      <path d="M34 122 L34 45 Q34 15 74 15 Q114 15 114 45 L114 122 Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- the little fellow stands firm: two planted feet -->
+  <g class="feet">
+    <rect x="42" y="120" width="22" height="10" rx="5"/>
+    <rect x="84" y="120" width="22" height="10" rx="5"/>
+  </g>
+
+  <!-- body: a stone tablet personified — three strata -->
+  <g clip-path="url(#telos-body)">
+    <!-- DROP — top stratum, wiped turn by turn -->
+    <rect x="30" y="10" width="88" height="58" fill="#7FD8E0"/>
+    <!-- FOLD — middle stratum, cacheable but droppable -->
+    <rect x="30" y="68" width="88" height="27" fill="#4FB3BF"/>
+    <!-- PIN — the carved base, lasts a lifetime -->
+    <rect x="30" y="95" width="88" height="35" fill="#2C5F66"/>
+
+    <!-- engraved turn-by-turn lines on the chest, wipeable -->
+    <g stroke="#1F4A50" stroke-width="3" stroke-linecap="round" opacity="0.30">
+      <line x1="49" y1="74" x2="93" y2="74"/>
+      <line x1="49" y1="85" x2="84" y2="85"/>
+    </g>
+
+    <!-- chiseled groove marking the immovable base -->
+    <line x1="30" y1="95" x2="118" y2="95" stroke="#7FD8E0" stroke-width="2" opacity="0.55"/>
+  </g>
+
+  <!-- the face: a calm, friendly keeper of your context -->
+  <g>
+    <!-- eyes -->
+    <circle cx="60" cy="40" r="8.5" fill="#1F4A50"/>
+    <circle cx="88" cy="40" r="8.5" fill="#1F4A50"/>
+    <circle cx="62.6" cy="37.4" r="2.8" fill="#EAF7F9"/>
+    <circle cx="90.6" cy="37.4" r="2.8" fill="#EAF7F9"/>
+    <!-- a quiet smile -->
+    <path d="M64 53 Q74 61 84 53" fill="none" stroke="#1F4A50"
+          stroke-width="3.2" stroke-linecap="round"/>
+  </g>
+
+  <!-- body outline -->
+  <path class="stone" d="M34 122 L34 45 Q34 15 74 15 Q114 15 114 45 L114 122 Z"
+        fill="none" stroke-width="2.5"/>
+
+  <!-- wordmark -->
+  <text class="wm" x="166" y="78" font-family="'Helvetica Neue', Arial, sans-serif" font-size="62" font-weight="700" letter-spacing="3">TELOS</text>
+  <text class="tg" x="168" y="104" font-family="'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="500" letter-spacing="3.4">PORTABLE AGENT CONTEXT</text>
+</svg>

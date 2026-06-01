@@ -1,0 +1,171 @@
+---
+title: "Architecture Reference"
+description: "The authoritative deep dive — core data structures, the bridge primitives, engine strategies, invariants, and extension points."
+icon: "book"
+---
+
+This is the authoritative architecture reference for the `telos-sdk` repository (the Python `telos`
+package). For the digestible overview, see [Three-layer Architecture](/en/concepts/architecture).
+
+## Repository map
+
+```
+telos-sdk/                  (Python package name = telos)
+├── ir.py            Core data structures: Band / TelosBlock / TelosMessage / TelosIR / UsageReport
+├── bridge.py        Policy core: 5 primitives + canonicalize + BridgeSessionState
+├── refpool.py       ref-pool: the "pointer table" for large content, slug freezing
+├── registry.py      Factory that loads harness / engine by name
+├── cli.py           `telos` unified CLI: proxy / init / dashboard / replay
+├── corpus.py        Session corpus: records raw requests for replay
+│
+├── harness/         Layer 1: upstream agent request → TelosIR
+│   ├── base.py · _user_split.py · openclaw.py · hermes.py · telos.py
+├── engine/          Layer 3: TelosIR → each engine's wire request
+│   ├── base.py · anthropic.py · openai.py · deepseek.py · vllm.py · sglang.py
+├── output_filter/   RTK-style tool result filtering (orthogonal to TELOS)
+│   ├── mode.py · filters.py · preprocess.py
+├── proxy/           Path B: HTTP reverse proxy
+│   ├── server.py · pipeline.py · inspector.py · __main__.py
+├── replay/          Recording → replay comparison engine
+├── init/            Path B installers (claude_code / generic / …)
+└── scripts/         Transports + dashboard builders
+```
+
+## Core data structure — TelosIR
+
+All dataclasses are **frozen (immutable)**: the bridge's "modifications" return a new IR rather than
+mutating bytes on the original object.
+
+```python
+@dataclass(frozen=True)
+class TelosBlock:
+    id: str
+    band: Band                  # PIN / FOLD / DROP
+    kind: BlockKind             # text / tool_def / tool_use / tool_result / image / thinking
+    payload: Any                # engine-agnostic content; translated by the adapter at emit
+    ref_slug: str | None        # non-null → comes from the ref-pool
+    source_tag: str | None      # diagnostic: which harness rule banded it
+    extra: Mapping              # stable side info needed by the engine (image detail, tool source…)
+
+@dataclass(frozen=True)
+class TelosMessage:
+    role: Literal["system", "user", "assistant"]
+    blocks: tuple[TelosBlock, ...]      # must satisfy §5: pin* → fold* → drop*
+
+@dataclass(frozen=True)
+class TelosIR:
+    session_id: str
+    tools:    tuple[TelosBlock, ...]    # all band=PIN
+    system:   tuple[TelosBlock, ...]    # pin* → fold*(incl. ref-pool) → drop*
+    messages: tuple[TelosMessage, ...]
+    ref_pool: Mapping[str, TelosBlock]  # slug → block
+    hints:    TelosHints
+```
+
+### UsageReport — normalized usage
+
+```python
+@dataclass(frozen=True)
+class UsageReport:
+    raw_input:   int   # input tokens neither hit nor written to cache
+    cache_read:  int   # read from cache
+    cache_write: int   # new tokens written to cache by this request
+    output:      int
+    raw: Mapping       # raw usage fields, kept for diagnostics
+```
+
+## Bridge — the five primitives
+
+One instance per session, **stateful**.
+
+| Primitive | Method | Effect |
+|---|---|---|
+| **Place** | `place(segment, blocks)` / `append_message(msg)` | Replace a segment's blocks / append a message, immediately running the §5 check |
+| **Pin** | `pin(slug, payload)` | Register a ref-pool entry; the slug is frozen immediately (registers a `band=FOLD` entry — "Pin" here means *fixing the pointer*, not `band=PIN`) |
+| **Mark** | `mark()` | Delegate to the engine adapter to decide cache anchor positions (returns an `EmitPlan`) |
+| **Fold** | `fold(slugs=, message_range=, summary=)` | Fold a ref-pool entry (swap payload only, not slug) or fold history into a summary |
+| **Refresh** | `refresh(plan)` | Trigger engine keep-alive; adaptive gating |
+
+### Canonicalization (fixes R5)
+
+Done uniformly before emit. The root cause: Swift / Go JSON serialization randomizes key order,
+causing prefix-hash drift.
+
+- `_canonicalize_payload` — sorts dict keys lexicographically (recursive).
+- `_canonicalize_schema` — for JSON-Schema subtrees, also sorts **set-semantics arrays** (currently
+  only `required`); deliberately does **not** sort `enum` / `examples` / `anyOf` / `oneOf` / `allOf`
+  (order is semantic).
+- `_canonicalize_tool_def` — recognizes Anthropic (`input_schema`) and OpenAI (`function.parameters`)
+  tool shapes.
+- `_tool_sort_key` — stable tool-array sort key `(source_rank, mcp_server, name)`; `source_rank`:
+  builtin(0) → mcp(1) → user(2) → unmarked(3).
+
+<Warning>
+  The payload of `tool_use` / `tool_result` is **user data**; only key sorting is done — array order is
+  never touched (a field that happens to be named `required` in a payload must not be silently
+  reordered).
+</Warning>
+
+### Bidirectional operations (vLLM / SGLang only)
+
+`is_bidirectional = isinstance(engine, BidirectionalEngineAdapter)`.
+
+| Bridge method | Closed-source API | vLLM / SGLang |
+|---|---|---|
+| `probe_cache()` | `ProbeResult(hit=False)` | actually sends a lookup |
+| `cooperative_fold(...)` | equivalent to `fold()` + `{}` | client-side fold + server `evict_span` / `fork_and_replace` fragments |
+| `emit_with_extras(extras)` | merges fragments into `plan.extras` then emits | same |
+
+## Engine strategies
+
+- **Anthropic** — the only one with explicit breakpoints. `plan_marks` produces up to 4 slots
+  (**BP-T** end of tools, **BP-S** last PIN of system, **BP-R** last FOLD of system, **BP-X** last
+  non-DROP block of the latest message, **BP-mid** when messages ≥ 19). Over 4 → trim by priority
+  `BP-T < BP-S < BP-R < BP-mid < BP-X`. `_LOOKBACK=20`, `_MID_ANCHOR_STRIDE=19`.
+- **OpenAI** — no explicit BP. Produces a `routing_key` (`telos-<sha256[:16]>`) + retention; arranges
+  blocks non-DROP → DROP so automatic prefix matching hits. `cache_write` always 0.
+- **DeepSeek** — zero control plane; disk context cache always on. Empty `EmitPlan()`; relies only on
+  non-DROP → DROP ordering.
+- **vLLM** — bidirectional. Writes `cache_policy` (`pin_prefix_until_block` / `evict_span`) +
+  `cache_salt`.
+- **SGLang** — a strict superset of vLLM. Writes `cache_control` (`lock_radix_path` / `path_hash` /
+  `prefer_tier` / `affinity_key` / `fork_from_path` / `replace_suffix`); adds `fork_and_replace` and
+  `tier_hint` (HiCache GPU/CPU/disk).
+
+### usage parsing
+
+| Engine | cache_read field | cache_write field |
+|---|---|---|
+| Anthropic | `cache_read_input_tokens` | `cache_creation_input_tokens` |
+| OpenAI | `prompt_tokens_details.cached_tokens` | always 0 |
+| DeepSeek | `prompt_cache_hit_tokens` | always 0 |
+| vLLM / SGLang | `cached_tokens` | always 0 |
+
+## Invariants and design constraints
+
+| ID | Constraint | Realization |
+|---|---|---|
+| §5 | Within each segment, `pin* → fold* → drop*` | `assert_band_order`, validated before and after emit |
+| I3 | A ref-pool slug is frozen once registered | `RefPool.register` raises on duplicate |
+| §4 | A `[ref:slug]` reference must exist in the ref-pool | `lint_blocks` fail-fast before emit |
+| R2 | Long conversations need a mid-rolling anchor | Anthropic `BP-mid` (messages ≥ 19) |
+| R5 | Cross-language JSON key disorder breaks the cache | `_canonicalize_*` in the bridge |
+| R6 | A thinking block cannot have cache_control attached | harness bands it FOLD; engine doesn't attach |
+| R7 | When BPs exceed 4, truncate by priority | Anthropic `BP-T<BP-S<BP-R<BP-mid<BP-X` |
+| R8 | Renewing a low-activity session loses money | `refresh` adaptive gating, `REFRESH_THRESHOLD=11` |
+
+## Extension points
+
+| What you want to do | What to change |
+|---|---|
+| Add a new agent installer | In `init/` add `<name>.py` implementing `AgentInstaller`, register in `init.INSTALLERS` |
+| Add a new harness | In `harness/` add a plugin, register in `registry.py` |
+| Add a new engine adapter | In `engine/` add an `EngineAdapter` / `BidirectionalEngineAdapter` subclass, register in the registry |
+| Add a tool filtering rule | The `FallbackFilter` in `output_filter/filters.py`, or route through the `rtk` binary |
+| Add a `/v1/chat/completions` proxy path | In `proxy/server.py` add a route, reusing the OpenAI pipeline |
+| Persist session state | `BridgeSessionState` is a plain dataclass, JSON-serializable; change `_SessionRegistry` to external storage |
+| Adjust the canonical sorting | The bridge's `_SCHEMA_SET_ARRAY_KEYS`, `_TOOL_SOURCE_RANK` are module-level and monkey-patchable |
+
+<Card title="Concepts overview" icon="sitemap" href="/en/concepts/architecture">
+  The three-layer design, explained from the top.
+</Card>
