@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 380" role="img" aria-label="三色带：PIN / FOLD / DROP">
+  <defs>
+    <linearGradient id="bgB" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F5FBFC"/>
+      <stop offset="1" stop-color="#E6F4F6"/>
+    </linearGradient>
+    <linearGradient id="pinG" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7FD8E0"/>
+      <stop offset="1" stop-color="#4FB3BF"/>
+    </linearGradient>
+    <linearGradient id="foldG" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#4FB3BF"/>
+      <stop offset="1" stop-color="#2C5F66"/>
+    </linearGradient>
+    <linearGradient id="dropG" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#FCB45A"/>
+      <stop offset="1" stop-color="#d8851f"/>
+    </linearGradient>
+  </defs>
+  <rect width="880" height="380" fill="url(#bgB)"/>
+
+  <text x="440" y="36" text-anchor="middle" font-family="Georgia, serif" font-size="18" fill="#1A3F44" font-weight="bold">三色带 · 让 KV-cache 在结构上"接得住"</text>
+  <text x="440" y="56" text-anchor="middle" font-family="Helvetica, Arial" font-size="12" fill="#555">每一个内容块在出生时就声明它的缓存生命周期 —— 不是事后启发，是一等结构标注</text>
+
+  <!-- The single prompt bar -->
+  <g transform="translate(60,90)">
+    <text x="0" y="-8" font-family="Helvetica, Arial" font-size="11" fill="#1A3F44">一轮请求里的整段 prompt：</text>
+
+    <!-- PIN -->
+    <rect x="0" y="0" width="340" height="56" fill="url(#pinG)"/>
+    <text x="170" y="24" text-anchor="middle" font-family="Helvetica, Arial" font-size="13" fill="#0E2A2E" font-weight="bold">PIN · 🟢</text>
+    <text x="170" y="42" text-anchor="middle" font-family="Helvetica, Arial" font-size="11" fill="#0E2A2E">工具说明 · 系统提示 · 当前问题</text>
+
+    <!-- FOLD -->
+    <rect x="340" y="0" width="280" height="56" fill="url(#foldG)"/>
+    <text x="480" y="24" text-anchor="middle" font-family="Helvetica, Arial" font-size="13" fill="#FFFFFF" font-weight="bold">FOLD · 🟡</text>
+    <text x="480" y="42" text-anchor="middle" font-family="Helvetica, Arial" font-size="11" fill="#FFFFFF">历史对话 · 工具返回 · 大文档</text>
+
+    <!-- DROP -->
+    <rect x="620" y="0" width="140" height="56" fill="url(#dropG)"/>
+    <text x="690" y="24" text-anchor="middle" font-family="Helvetica, Arial" font-size="13" fill="#FFFFFF" font-weight="bold">DROP · 🔴</text>
+    <text x="690" y="42" text-anchor="middle" font-family="Helvetica, Arial" font-size="11" fill="#FFFFFF">时间戳 · CWD · PID</text>
+
+    <!-- BP markers -->
+    <g font-family="Helvetica, Arial" font-size="10" fill="#1A3F44">
+      <line x1="340" y1="56" x2="340" y2="76" stroke="#1A3F44"/>
+      <text x="340" y="90" text-anchor="middle">BP1（PIN/FOLD 边界）</text>
+      <line x1="620" y1="56" x2="620" y2="76" stroke="#1A3F44"/>
+      <text x="620" y="90" text-anchor="middle">最后一个 BP</text>
+    </g>
+
+    <!-- Hash inclusion arrow -->
+    <g transform="translate(0,118)" font-family="Helvetica, Arial" font-size="11" fill="#1A3F44">
+      <line x1="0" y1="0" x2="618" y2="0" stroke="#2C5F66" stroke-width="2"/>
+      <polygon points="618,0 610,-5 610,5" fill="#2C5F66"/>
+      <text x="309" y="-6" text-anchor="middle" fill="#2C5F66" font-weight="bold">↑ 进入 prefix hash · 字节相同就命中缓存</text>
+      <line x1="620" y1="0" x2="760" y2="0" stroke="#d8851f" stroke-width="2" stroke-dasharray="5 4"/>
+      <text x="690" y="-6" text-anchor="middle" fill="#d8851f" font-weight="bold">↑ 排除在 hash 外</text>
+    </g>
+  </g>
+
+  <!-- Semantics card -->
+  <g transform="translate(60,250)" font-family="Helvetica, Arial">
+    <rect width="760" height="110" rx="10" fill="#FFFFFF" stroke="#7FD8E0"/>
+    <g transform="translate(20,26)">
+      <text font-size="13" fill="#2C5F66" font-weight="bold">PIN · 不可变</text>
+      <text y="20" font-size="11" fill="#1A3F44">石板底座的碑文 ——</text>
+      <text y="36" font-size="11" fill="#1A3F44">永不重写，永不驱逐。</text>
+      <text y="52" font-size="11" fill="#1A3F44">构成每次请求的不动前缀。</text>
+    </g>
+    <g transform="translate(280,26)">
+      <text font-size="13" fill="#2C5F66" font-weight="bold">FOLD · 可折叠</text>
+      <text y="20" font-size="11" fill="#1A3F44">装订成册的旧页 ——</text>
+      <text y="36" font-size="11" fill="#1A3F44">压力大时换成摘要，</text>
+      <text y="52" font-size="11" fill="#1A3F44">PIN 前缀字节保持不变。</text>
+    </g>
+    <g transform="translate(540,26)">
+      <text font-size="13" fill="#d8851f" font-weight="bold">DROP · 即焚</text>
+      <text y="20" font-size="11" fill="#1A3F44">粉笔写的便签 ——</text>
+      <text y="36" font-size="11" fill="#1A3F44">放在所有 BP 之后，</text>
+      <text y="52" font-size="11" fill="#1A3F44">绝不污染上游字节。</text>
+    </g>
+  </g>
+</svg>

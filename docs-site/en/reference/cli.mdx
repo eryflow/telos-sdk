@@ -1,0 +1,102 @@
+---
+title: "CLI Reference"
+description: "Every telos subcommand and flag — gateway management, integration, mode switching, dashboard, and replay."
+icon: "terminal"
+---
+
+```
+telos                        bare command: pick a harness and enter its CLI
+telos <harness>              enter a harness directly (claude-code / codex / openclaw / hermes)
+telos alias <harness>        set the harness that bare telos enters by default
+```
+
+## `telos init`
+
+```
+telos init [options]
+  --harness {claude-code,codex,openclaw,hermes,generic}
+                       operate on the specified harness only (default: auto-detect all)
+  --gateway-url URL    gateway address (default taken from ~/.telos/config.json)
+  --status             view only, don't modify files
+  --no-gateway         only inject config, don't start the gateway automatically
+```
+
+With no arguments, `telos init` auto-detects installed harness CLIs, injects gateway-pointing config
+into each, and starts the gateway in the background.
+
+## `telos uninstall`
+
+```
+telos uninstall [options]
+  --harness {claude-code,codex,openclaw,hermes,generic}
+                       restore the pre-install state for a single harness
+                       (default: apply to every known harness)
+```
+
+## `telos gateway`
+
+```
+telos gateway [start|stop|status|restart] [options]
+  --host HOST          listen address (default 127.0.0.1)
+  --port PORT          listen port (default 7171)
+  --mode {none,telos,rtk,both}   default optimization gear
+  --usage-log PATH     append one jsonl line per call
+  --foreground         run in the foreground, blocking (no backgrounding)
+```
+
+After a background start, state is in `~/.telos/gateway.json` and the log in `~/.telos/gateway.log`.
+
+## `telos mode`
+
+```
+telos mode [none|telos|rtk|both]   switch the optimization gear; hot-reloads the running gateway and persists it
+```
+
+| label | telos | rtk | Meaning |
+|---|:---:|:---:|---|
+| `none` | ✗ | ✗ | pure passthrough |
+| `telos` | ✓ | ✗ | TELOS prefix caching only (default) |
+| `rtk` | ✗ | ✓ | RTK tool filtering only |
+| `both` | ✓ | ✓ | both enabled |
+
+## `telos dashboard`
+
+```
+telos dashboard [--static] [--no-open]   open the dashboard in the browser
+telos dashboard --usage-log ~/.telos/usage.jsonl --out savings.html
+```
+
+Live if the gateway is running, otherwise builds a static HTML.
+
+## `telos replay`
+
+```
+telos replay --list                                    list recorded sessions
+telos replay --session <id> --modes none telos rtk both
+```
+
+Replays a recorded session under each mode with `max_tokens=1` to measure only prefill/cache billing.
+See [Replay & Comparison](/en/observability/replay).
+
+## `telos status` / `telos version`
+
+```
+telos status            gateway state + per-harness install + live traffic, in one place
+telos status --json     machine-readable output
+telos version           print the installed SDK version (alias: telos -V)
+```
+
+## `telos proxy` (hidden alias)
+
+```
+telos proxy [options]   runs the gateway in the foreground, blocking; fully compatible with the old flags
+```
+
+<Note>
+  For `telos gateway` / `telos init`, any host/port/mode not passed defaults to `~/.telos/config.json`;
+  explicitly passed values are written back as the new default.
+</Note>
+
+<Card title="Proxy gateway guide" icon="network-wired" href="/en/guides/proxy-gateway">
+  Walkthroughs for each command in context.
+</Card>

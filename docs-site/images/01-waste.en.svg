@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 360" role="img" aria-label="Today's agents burn 3 out of every 4 dollars — token efficiency only 25%">
+  <defs>
+    <linearGradient id="bgW" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1A1130"/>
+      <stop offset="1" stop-color="#2A1A4A"/>
+    </linearGradient>
+    <linearGradient id="wasted" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#d8851f"/>
+      <stop offset="1" stop-color="#a14a08"/>
+    </linearGradient>
+  </defs>
+  <rect width="860" height="360" fill="url(#bgW)"/>
+
+  <text x="430" y="44" text-anchor="middle" font-family="Georgia, serif" font-size="22" fill="#FFFFFF" font-weight="bold">Today's agents burn 3 out of every 4 dollars</text>
+  <text x="430" y="70" text-anchor="middle" font-family="Helvetica, Arial" font-size="13" fill="#A78BFA">Real long-session token utilization across mainstream harnesses (openclaw, etc.) ≈ 25%</text>
+
+  <!-- Big donut -->
+  <g transform="translate(220,200)">
+    <!-- Wasted 75% -->
+    <circle r="100" fill="none" stroke="url(#wasted)" stroke-width="44"
+            stroke-dasharray="471.24 628.32" stroke-dashoffset="0"
+            transform="rotate(-90)"/>
+    <!-- Effective 25% -->
+    <circle r="100" fill="none" stroke="#7FD8E0" stroke-width="44"
+            stroke-dasharray="157.08 628.32" stroke-dashoffset="-471.24"
+            transform="rotate(-90)"/>
+
+    <text x="0" y="-4" text-anchor="middle" font-family="Helvetica, Arial" font-size="40" fill="#FFFFFF" font-weight="bold">25%</text>
+    <text x="0" y="22" text-anchor="middle" font-family="Helvetica, Arial" font-size="11" fill="#A78BFA">Tokens doing real work</text>
+  </g>
+
+  <!-- Legend / waste callouts -->
+  <g font-family="Helvetica, Arial" transform="translate(420,140)">
+    <text font-size="14" fill="#FFFFFF" font-weight="bold">Where does the 75% go?</text>
+
+    <g transform="translate(0,28)">
+      <rect width="14" height="14" fill="#d8851f"/>
+      <text x="22" y="12" font-size="12" fill="#FFFFFF">Re-prefilling the same prefix every turn —</text>
+      <text x="22" y="28" font-size="12" fill="#FCB45A">cache hit costs 10%, miss costs 100%</text>
+    </g>
+
+    <g transform="translate(0,72)">
+      <rect width="14" height="14" fill="#d8851f"/>
+      <text x="22" y="12" font-size="12" fill="#FFFFFF">Every memory write hits the expensive LLM first —</text>
+      <text x="22" y="28" font-size="12" fill="#FCB45A">most notes are never read, but you pay anyway</text>
+    </g>
+
+    <g transform="translate(0,116)">
+      <rect width="14" height="14" fill="#d8851f"/>
+      <text x="22" y="12" font-size="12" fill="#FFFFFF">Inflating savings with cheap tokens as denominator —</text>
+      <text x="22" y="28" font-size="12" fill="#FCB45A">same-family tier price gap is now 80×–150× in 2026</text>
+    </g>
+
+    <g transform="translate(0,160)">
+      <rect width="14" height="14" fill="#d8851f"/>
+      <text x="22" y="12" font-size="12" fill="#FFFFFF">GPU-days for training auxiliary evaluators —</text>
+      <text x="22" y="28" font-size="12" fill="#FCB45A">never show up in the headline numbers</text>
+    </g>
+  </g>
+</svg>

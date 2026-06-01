@@ -1,0 +1,109 @@
+---
+title: "Path B · Proxy Gateway"
+description: "The zero-intrusion HTTP reverse proxy — start, stop, configure, and how harness auto-detection works."
+icon: "network-wired"
+---
+
+The gateway is an aiohttp reverse proxy. The agent sets `ANTHROPIC_BASE_URL=http://127.0.0.1:7171`,
+with zero code changes; `POST /v1/messages` is forwarded after passing through the TELOS pipeline, and
+every other path is passed through unchanged.
+
+## Starting the gateway
+
+`telos init` already starts the gateway in the background automatically. You can also manage it
+manually:
+
+```bash
+telos gateway start                    # background start (host/port/mode from ~/.telos/config.json)
+telos gateway start --port 7171        # specify the port (and write it back as the new default)
+telos gateway status                   # check the run status
+telos gateway restart                  # restart
+telos gateway stop                     # stop
+telos gateway start --foreground       # run in the foreground, blocking (debugging / containers)
+```
+
+After a background start, state is recorded in `~/.telos/gateway.json` and the log in
+`~/.telos/gateway.log`, which prints:
+
+```
+TELOS gateway listening on http://127.0.0.1:7171 → https://api.anthropic.com
+usage log → /Users/.../usage.jsonl
+```
+
+<Note>
+  The old `telos proxy ...` (foreground, blocking) is kept as a hidden alias, fully flag-compatible.
+</Note>
+
+## Default behavior
+
+- The gateway accepts all Anthropic protocol paths; `/v1/messages` is rewritten by TELOS, everything
+  else is passed through unchanged.
+- **Non-strict by default:** on a TELOS failure it degrades to passthrough. `--strict` changes this to
+  return a 500 instead.
+- It embeds the dashboards at `/__telos/dashboard`, `/__telos/developer`, and `/__telos/developer.json`.
+
+## Harness auto-detection
+
+The gateway automatically determines which harness each request belongs to — no manual specification
+needed. Beyond the main conversation, Claude Code also sends auxiliary requests via Haiku
+(conversation-title generation, new-topic detection). These have no tools and no `<system-reminder>`
+tag, so the gateway identifies them via the HTTP `User-Agent` header (`claude-cli/...`) and remembers
+the result **per client**, so auxiliary requests are also correctly attributed and won't be shown as
+`openclaw`. See [Harness integration](/en/guides/harnesses) for the full detection order.
+
+## session-id derivation
+
+Inside the proxy, an LRU `_SessionRegistry` (default cap 10000) holds one `BridgeSessionState` per
+session. The session_id is derived, in priority order:
+
+1. the `x-telos-session` HTTP header (explicit override),
+2. `metadata.user_id` (an Anthropic SDK built-in field),
+3. `blake2b(api_key + system + tools + messages[0])` → `telos-<16 hex>`.
+
+This means the N turns of one conversation (only appending to the tail of `messages[]`) map to the
+**same** session_id, a different initial prompt maps to a different one, and two users with different
+API keys never collide.
+
+## Integrating clients
+
+<Tabs>
+  <Tab title="Claude Code">
+    ```bash
+    telos init --harness claude-code
+    ```
+    Writes `ANTHROPIC_BASE_URL` into the `env` field of `~/.claude/settings.json` (atomic write, with
+    a `.telos.bak` backup and a `__telos_installed` marker). Does not touch the npm package or PATH,
+    and survives `npm update`.
+  </Tab>
+  <Tab title="Codex">
+    ```bash
+    telos init --harness codex
+    ```
+    Adds a `model_provider = "telos"` custom provider to `~/.codex/config.toml`, pointing Codex at
+    `http://127.0.0.1:7171/upstreams/openai/v1`. Codex uses the OpenAI Responses API by default; the
+    gateway routes that path as passthrough, while OpenAI ChatCompletions-compatible traffic through
+    the same path is TELOS-processed.
+  </Tab>
+  <Tab title="OpenClaw / Hermes">
+    These patch their own provider configs via `telos init`.
+  </Tab>
+  <Tab title="Generic">
+    ```bash
+    telos init --harness generic
+    ```
+    Prints a set of manual `export ANTHROPIC_BASE_URL=...` / `OPENAI_BASE_URL=...` instructions for any
+    client that respects those variables.
+  </Tab>
+</Tabs>
+
+## Undo / inspect
+
+```bash
+telos uninstall --harness claude-code          # restore the pre-install state
+telos init --harness claude-code --status      # view only, don't modify files
+telos status                                   # gateway + per-harness install + live traffic
+```
+
+<Card title="Full CLI reference" icon="terminal" href="/en/reference/cli">
+  Every flag for `telos gateway`, `telos init`, `telos mode`, and more.
+</Card>

@@ -1,0 +1,108 @@
+---
+title: "SWE-bench Verified A/B"
+description: "A pre-registered dual-arm study: TELOS halves the input-token bill at the same correctness band — ratios can be faked, dollars can't."
+icon: "flask"
+---
+
+Token savings are only useful if the agent still solves the problem. We ran a **pre-registered** A/B on
+SWE-bench Verified with the Hermes harness and `deepseek/deepseek-v4-flash` — 100 instances per arm, a
+seeded sample across 8 repos (sphinx, matplotlib, xarray, pytest, requests, pylint, seaborn, flask).
+**99 instances per arm were graded under the official Docker harness** (1 excluded due to a missing
+per-instance docker image upstream).
+
+<Note>
+  Pre-registered means assignment, sampling, and statistical tests were fixed *before* the data was
+  run — avoiding the *p*-hacking risk of post-hoc sample selection.
+</Note>
+
+## Resolved rate (docker-graded, n=99/arm, paired)
+
+| Arm | Resolved | Rate | 95% Wilson CI |
+|---|---:|---:|---|
+| **TELOS** | 45 / 99 | **45.5%** | [36.0%, 55.2%] |
+| Vanilla | 42 / 99 | 42.4% | [33.2%, 52.3%] |
+
+Paired 2×2 on the same 99 instances: both resolved 33; TELOS-only 12; vanilla-only 9; neither 45.
+
+|  | Vanilla ✓ | Vanilla ✗ |
+|---|---:|---:|
+| **TELOS ✓** | 33 | 12 |
+| **TELOS ✗** | 9 | 45 |
+
+Exact McNemar two-sided **p = 0.66** — the +3 pp absolute gap is **not statistically significant**.
+TELOS does not regress resolved rate at this sample size.
+
+## Token efficiency (agent-side, n=99/arm, same instances)
+
+| Per-task | TELOS | Vanilla | Δ |
+|---|---:|---:|---:|
+| **new_input** (post-cache, billed) | 93,712 | 198,706 | **−52.8%** |
+| prompt_tokens (raw + cache) | 352,400 | 515,953 | −31.7% |
+| output_tokens | 24,975 | 25,218 | −1.0% |
+| api_calls | 32.6 | 32.1 | +1.4% |
+| **cache_share** | **73.4%** | 61.5% | **+11.9 pp** |
+| reported cost (USD) | \$2.29 | \$3.85 | **−40.5%** |
+
+## The key observation: savings come from the protocol, not from doing less
+
+The near-zero difference in `output_tokens` (−1.0%) and `api_calls` (+1.4%) is the core finding. A
+common alternative hypothesis is that TELOS trades token savings for *less reasoning* (fewer tool
+calls, shorter output) — if true, output and api_calls would drop significantly. The table rejects
+that: the savings come entirely from prompt-side byte stability and cache hits, consistent with the
+[monotonic-append guarantee](/en/concepts/protocol).
+
+## Read this honestly
+
+<Warning>
+  The 99-instance subset gives a Wilson CI of roughly ±10 pp on each arm, and the paired difference Δ
+  has a 95% CI of about [−6 pp, +12 pp]. This run **can** rule out an absolute regression worse than
+  ~6 pp at 95% confidence, but **cannot** pin Δ to ±2 pp (that needs n ≥ 400/arm). What it shows with
+  high confidence: the input-token bill is roughly halved, and end-to-end cost drops ~40%, at the same
+  correctness band.
+</Warning>
+
+## Three orthogonal axes
+
+The study supports a more general claim: agent economics can be attacked along three
+non-substitutable axes —
+
+<CardGroup cols={3}>
+  <Card title="Content compression" icon="compress">
+    LongLLMLingua, AutoCompressors — lossy reduction of total tokens.
+  </Card>
+  <Card title="Engine caching" icon="microchip">
+    vLLM PagedAttention, SGLang RadixAttention — reuse computed prefixes.
+  </Card>
+  <Card title="Protocol contract" icon="file-signature">
+    **TELOS** — guarantee the bytes are stable so the engine cache *can* hit.
+  </Card>
+</CardGroup>
+
+The axes are orthogonal: once TELOS pushes cache hit rate to saturation, engine work shifts to capacity
+and eviction; where raw_input is still large, content compression can apply selectively in the FOLD
+region — and PIN/DROP byte stability guarantees the compression won't break the prefix.
+
+## Reproduce it
+
+You don't have to trust the percentages — the artifacts, sampling seed, and evaluation scripts are all
+in the repo.
+
+```bash
+# Agent stage (n = 100 / arm)
+python scripts/run_swebench_batch.py -n 100 --seed 7 \
+  --workers 4 --output /tmp/telos-ab-n100/with
+
+python scripts/run_swebench_batch.py -n 100 --seed 7 \
+  --workers 4 --output /tmp/telos-ab-n100/without --no-telos
+
+# Docker evaluation
+python -m swebench.harness.run_evaluation \
+  --dataset_name princeton-nlp/SWE-bench_Verified \
+  --predictions_path predictions-telos.jsonl \
+  --max_workers 3 --run_id ab-n100-telos \
+  --cache_level instance --timeout 1500
+```
+
+<Card title="About & Citation" icon="quote-left" href="/en/reference/about">
+  Cite the study and the protocol.
+</Card>

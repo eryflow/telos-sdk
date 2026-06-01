@@ -1,0 +1,87 @@
+---
+title: "三色带"
+description: "PIN / FOLD / DROP——每个内容块必须落入的清晰切分，以及赢得 cache 的排序不变量。"
+icon: "layer-group"
+---
+
+三色带是 TELOS 的核心抽象。每个内容块必须恰好落入 `PIN` / `FOLD` / `DROP` 之一——不存在"既可缓存又
+不可缓存"的灰色状态。
+
+<Frame>
+  <img src="/images/03-banding.svg" alt="PIN / FOLD / DROP 三色带" />
+</Frame>
+
+## `Band` 枚举
+
+定义于 `ir.py`：
+
+```python
+class Band(str, Enum):
+    PIN  = "pin"    # 长期稳定段：工具定义、system prompt、用户当前问题
+    FOLD = "fold"   # 可缓存但压缩时可丢弃：assistant 回复、tool_result、ref-pool 大文档
+    DROP = "drop"   # 永不进入 cache hash：时间戳、cwd、git status、envelope；必须在段尾
+```
+
+排序权重 `_BAND_RANK = {PIN: 0, FOLD: 1, DROP: 2}`。
+
+| 带 | 语义 | 缓存行为 |
+|---|---|---|
+| **PIN** 🟢 | 工具定义、system prompt、当前问题 | 永久。每个请求 prefix hash 的不可变基底。 |
+| **FOLD** 🟡 | 对话历史、工具结果、大文档（ref-pool）| 可缓存、可压缩。压力下被摘要替换——PIN 字节不变。 |
+| **DROP** 🔴 | 时间戳、CWD、git status、PID、每轮 envelope | 完全排除在 prefix hash 之外；必须在所有断点之后。 |
+
+## 排序不变量（§5）
+
+每段内，块必须物理排布为 **`pin* → fold* → drop*`**——跨每条消息、跨整个 prompt、在每一层。违反将立即抛出
+`TelosInvariantError`。这是唯一的硬约束，其余皆为软建议。
+
+### 校验函数
+
+- **`enforce_band_order(blocks)`** —— 稳定地排序为 `pin* → fold* → drop*`（同带内保留插入顺序）。harness
+  组装消息时作为兜底调用。
+- **`assert_band_order(blocks, where)`** —— O(n) 单遍扫描；一旦发现 rank 回退即抛 `TelosInvariantError`。
+- **`assert_ir_invariants(ir)`** —— 对整个 IR 做完整校验，并额外要求 `tools` 全部 `band=PIN`。
+
+## 内容如何被分带
+
+harness 层在解析原始请求时分配带（三个 harness 通用规则）：
+
+| 上游内容 | 带 | 说明 |
+|---|---|---|
+| `tools[]` | PIN | `kind=tool_def` |
+| `system` 文本（≤ 2048 字符）| PIN | |
+| `system` 文本（> 2048）/ `<file>` 块 | FOLD（入 ref-pool）+ 一个 PIN 引用桩 | 阈值 `_REFPOOL_THRESHOLD = 2048` |
+| user 文本 | 拆分为 PIN / FOLD / DROP | 见下 |
+| user `tool_result` | FOLD | |
+| assistant 文本 / `tool_use` / `thinking` | FOLD | |
+
+### 拆分一条 user 消息
+
+`_user_split.split_user_text` 把一条 user 消息切成 PIN（真正的问题）+ FOLD（历史回显）+ DROP（envelope），
+使用一组正则：
+
+- **DROP** —— 每轮变化的 envelope：`<environment_info>`、`<system-reminder>`、`<command-message>`、
+  `<command-name>`、`Current time: …`
+- **FOLD** —— 显式包裹的历史回显：`<prev>…</prev>`
+- **PIN** —— 剥离上述后剩下的就是用户的问题。
+
+返回的元组已是 §5 顺序，可直接放入 `TelosMessage`。
+
+## 为什么排序*就是*不变量
+
+若高可变性的 DROP 块（时间戳）出现在 PIN 块之前，则每当时间戳变化，PIN 字节就移到不同字节偏移——引擎的
+前缀匹配随之破裂。把 DROP 严格放在最后，意味着易变字节永远无法污染稳定前缀。
+
+<Warning>
+  任何必须进入 cache hash 的字段，都要写进块的 `extra` 映射，并由引擎适配器在 emit 时一并序列化。harness
+  **绝不**能在 emit 时注入字段——那会破坏字节稳定。
+</Warning>
+
+<CardGroup cols={2}>
+  <Card title="协议" icon="sparkles" href="/zh/concepts/protocol">
+    三个不变量与单调追加保证。
+  </Card>
+  <Card title="ref-pool" icon="table-cells" href="/zh/concepts/refpool">
+    超大 FOLD 内容如何被指针化并折叠而不破坏前缀。
+  </Card>
+</CardGroup>

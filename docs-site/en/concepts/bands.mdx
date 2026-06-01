@@ -1,0 +1,93 @@
+---
+title: "Three-color Bands"
+description: "PIN / FOLD / DROP — the clean cut that every content block must land in, and the ordering invariant that wins the cache."
+icon: "layer-group"
+---
+
+The three-color band is TELOS's central abstraction. Every content block must land in exactly one of
+`PIN` / `FOLD` / `DROP` — there is no gray "both cacheable and non-cacheable" state.
+
+<Frame>
+  <img src="/images/03-banding.en.svg" alt="PIN / FOLD / DROP bands" />
+</Frame>
+
+## The `Band` enum
+
+Defined in `ir.py`:
+
+```python
+class Band(str, Enum):
+    PIN  = "pin"    # Long-lived stable segment: tool definitions, system prompt, the user's current question
+    FOLD = "fold"   # Cacheable but droppable on compact: assistant replies, tool_result, ref-pool large docs
+    DROP = "drop"   # Never enters the cache hash: timestamp, cwd, git status, envelope; must be at the segment end
+```
+
+The sorting weights are `_BAND_RANK = {PIN: 0, FOLD: 1, DROP: 2}`.
+
+| Band | Semantics | Cache behavior |
+|---|---|---|
+| **PIN** 🟢 | Tool defs, system prompt, the current question | Permanent. The immutable base of every request's prefix hash. |
+| **FOLD** 🟡 | Conversation history, tool results, large docs (ref-pool) | Cacheable, compactable. Replaced by a summary under pressure — PIN bytes stay untouched. |
+| **DROP** 🔴 | Timestamps, CWD, git status, PIDs, per-turn envelopes | Excluded entirely from the prefix hash; must come after all breakpoints. |
+
+## The ordering invariant (§5)
+
+Within each segment, blocks must be physically arranged as **`pin* → fold* → drop*`** — across every
+message, across the full prompt, at every layer. A violation immediately raises `TelosInvariantError`.
+This is the only hard constraint; everything else is a soft recommendation.
+
+### Validation functions
+
+- **`enforce_band_order(blocks)`** — stably sorts blocks into `pin* → fold* → drop*` (preserving
+  insertion order within the same band). Called as a fallback when a harness assembles a message.
+- **`assert_band_order(blocks, where)`** — an O(n) single-pass scan; raises `TelosInvariantError` the
+  moment a rank regression is found.
+- **`assert_ir_invariants(ir)`** — runs full validation over the entire IR, additionally requiring
+  that `tools` are all `band=PIN`.
+
+## How content is banded
+
+The harness layer assigns bands when it parses a raw request (the rules are common to all three
+harnesses):
+
+| Upstream content | Band | Notes |
+|---|---|---|
+| `tools[]` | PIN | `kind=tool_def` |
+| `system` text (≤ 2048 chars) | PIN | |
+| `system` text (> 2048) / `<file>` block | FOLD (into ref-pool) + a PIN reference stub | Threshold `_REFPOOL_THRESHOLD = 2048` |
+| user text | split into PIN / FOLD / DROP | see below |
+| user `tool_result` | FOLD | |
+| assistant text / `tool_use` / `thinking` | FOLD | |
+
+### Splitting a user message
+
+`_user_split.split_user_text` divides one user message into PIN (the actual question) + FOLD (history
+echo) + DROP (envelope), using a regex set:
+
+- **DROP** — the envelope that changes each round: `<environment_info>`, `<system-reminder>`,
+  `<command-message>`, `<command-name>`, `Current time: …`
+- **FOLD** — explicitly wrapped history echo: `<prev>…</prev>`
+- **PIN** — whatever remains after stripping the above is the user's question.
+
+The returned tuple is already in §5 order and drops straight into a `TelosMessage`.
+
+## Why ordering *is* the invariant
+
+If a high-variability DROP block (a timestamp) appears before a PIN block, the PIN bytes shift to a
+different byte offset every time the timestamp changes — and the engine's prefix match breaks. Keeping
+DROP strictly last means the volatile bytes can never contaminate the stable prefix.
+
+<Warning>
+  Any field that must enter the cache hash has to be written into a block's `extra` mapping and
+  serialized by the engine adapter at emit time. The harness must **never** inject a field at emit
+  time — that would break byte stability.
+</Warning>
+
+<CardGroup cols={2}>
+  <Card title="The Protocol" icon="sparkles" href="/en/concepts/protocol">
+    The three invariants and the monotonic-append guarantee.
+  </Card>
+  <Card title="ref-pool" icon="table-cells" href="/en/concepts/refpool">
+    How oversized FOLD content is pointer-ized and folded without breaking the prefix.
+  </Card>
+</CardGroup>

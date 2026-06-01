@@ -1,0 +1,105 @@
+---
+title: "路径 A · SDK 传输"
+description: "进程内集成——把你的 Anthropic 或 OpenAI 客户端换成 TELOS 传输；每个 .create() 调用保持不变。"
+icon: "code"
+---
+
+路径 A 把 agent 的 LLM 客户端换成一个鸭子接口完全一致的 TELOS 传输。一个 transport 实例等于一个会话，
+内部持有一个 `BridgeSessionState`。
+
+## Anthropic 客户端
+
+用于 Claude Code / OpenClaw / Hermes / 自建的 Anthropic 形态 agent。把 `anthropic.Anthropic()` 换成
+`TelosAnthropicTransport`；其余所有 `.messages.create()` 调用保持不变：
+
+```python
+# 之前
+import anthropic
+client = anthropic.Anthropic()
+
+# 之后
+from telos.scripts.telos_anthropic_transport import TelosAnthropicTransport
+client = TelosAnthropicTransport(
+    session_id="my-agent-session",       # 同一对话用同一个 id
+    usage_log="logs/usage.jsonl",
+    prompt_trace_log="logs/trace.jsonl",
+    # harness_name="hermes",             # 留空则自动探测
+)
+
+# 调用完全不变
+response = client.messages.create(
+    model="claude-opus-4-7",
+    max_tokens=8192,
+    system=[{"type": "text", "text": "You are an engineer."}],
+    tools=[...],
+    messages=[...],
+)
+print(response.content[0].text)
+```
+
+### 构造参数
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `api_key` | `$ANTHROPIC_API_KEY` | Anthropic API key |
+| `base_url` | `None`（SDK 默认）| 可指向本地代理用于调试 |
+| `session_id` | `"telos-session"` | 同一对话保持同一 id；多轮缓存累积的关键 |
+| `harness_name` | `None`（自动探测）| 强制 `"openclaw"` / `"hermes"` |
+| `engine_name` | `"anthropic"` | 通常不动 |
+| `usage_log` | `None` | jsonl 路径；每次调用追加一行（归一化 usage）|
+| `prompt_trace_log` | `None` | jsonl 路径；记录 IR 布局 / plan / 累积诊断 |
+| `session_state` | `None`（内部新建）| 多个 transport 共享一个对话时显式传入 |
+
+<Note>
+  harness 自动探测：system 含 `<system-reminder>` / `<command-message>`，或某条消息含 `thinking`
+  块 → 选 `hermes`；否则 `openclaw`。完整顺序见 [Harness 集成](/zh/guides/harnesses)。
+</Note>
+
+## OpenAI 客户端
+
+用于 telos / mini_swe_runner / 自建的 OpenAI 形态 agent：
+
+```python
+# 之前
+from openai import OpenAI
+client = OpenAI(base_url="https://openrouter.ai/api/v1")
+
+# 之后
+from telos.scripts.telos_transport import TelosOpenAITransport
+client = TelosOpenAITransport(
+    base_url="https://openrouter.ai/api/v1",
+    session_id="telos-session",
+    usage_log="logs/usage.jsonl",
+    engine_name="deepseek",              # 或 "openai"
+    harness_name="telos",                # 固定
+)
+
+response = client.chat.completions.create(
+    model="deepseek-chat",
+    messages=[...],
+    tools=[...],
+)
+```
+
+OpenAI 传输走 `telos` harness，用自定义的 `_ir_to_chat_completions` 产出 wire——保留 OpenAI 的
+`tool_calls` / `role=tool` 结构，而非内联成文本。
+
+## 跨 transport 共享一个对话
+
+若一个对话由多个 transport 实例处理（例如重试后重建客户端），显式传入 `BridgeSessionState`，让第二个实例
+看见累积的 ref-pool 与计数器：
+
+```python
+from telos.bridge import BridgeSessionState
+from telos.scripts.telos_anthropic_transport import TelosAnthropicTransport
+
+shared = BridgeSessionState()
+t1 = TelosAnthropicTransport(session_id="conv-1", session_state=shared)
+# ... t1 出错并被销毁 ...
+t2 = TelosAnthropicTransport(session_id="conv-1", session_state=shared)
+# t2 能看见 t1 累积的 ref-pool 与 R8 计数
+```
+
+<Card title="多轮状态累积" icon="arrows-rotate" href="/zh/guides/multi-turn-state">
+  两条路径上跨轮状态如何持有与观察。
+</Card>
