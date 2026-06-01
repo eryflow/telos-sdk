@@ -1,4 +1,4 @@
-"""Ref-pool: the "pointer table" for all large content blocks.
+r"""Ref-pool: the "pointer table" for all large content blocks.
 
 Design points
 -------------
