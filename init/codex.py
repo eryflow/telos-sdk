@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,6 +48,38 @@ _ABSENT = "<absent>"
 
 _CHATGPT_SLUG = "codex-chatgpt"
 _CHATGPT_UPSTREAM_URL = "https://chatgpt.com/backend-api/codex"
+
+# Slug under which a custom (e.g. cc-switch-written) Codex provider relay is
+# captured so the gateway forwards to it instead of api.openai.com.
+_CODEX_RELAY_SLUG = "codex-upstream"
+_OFFICIAL_OPENAI_HINTS = ("api.openai.com", "chatgpt.com")
+
+_PROVIDER_NAME_RE = re.compile(r'model_provider\s*=\s*"([^"]+)"')
+
+
+def _extract_provider_base_url(text: str, provider: str) -> str | None:
+    """Best-effort: read ``base_url`` from a ``[model_providers.<provider>]``
+    table in raw config.toml text, without a TOML parser (Python 3.10 has none
+    in stdlib). Returns ``None`` if the table or its base_url is absent.
+    """
+    if not provider:
+        return None
+    lines = text.splitlines()
+    headers = (f"[model_providers.{provider}]", f'[model_providers."{provider}"]')
+    in_table = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped in headers:
+            in_table = True
+            continue
+        if in_table:
+            if stripped.startswith("["):  # next table → stop
+                break
+            m = re.match(r'base_url\s*=\s*"([^"]+)"', stripped)
+            if m:
+                return m.group(1)
+    return None
+
 
 
 def _default_config_path() -> Path:
@@ -270,6 +303,34 @@ class CodexInstaller(AgentInstaller):
             f"registered telos upstream {_CHATGPT_SLUG!r} → {_CHATGPT_UPSTREAM_URL}"
         )
 
+    def _ensure_codex_upstream(self, relay_url: str, result: InstallResult) -> None:
+        """Capture a custom Codex provider relay (e.g. one cc-switch wrote) under
+        :data:`_CODEX_RELAY_SLUG` so the gateway forwards to it instead of
+        api.openai.com. Idempotent. The relay's API key is not stored — it rides
+        the request header through the gateway.
+        """
+        try:
+            cfg = load_config()
+        except RuntimeError as e:
+            result.notes.append(
+                f"could not read ~/.telos/config.json ({e}); the gateway needs a "
+                f"{_CODEX_RELAY_SLUG!r} upstream → {relay_url} for this provider."
+            )
+            return
+        normalized = re.sub(r"/v\d+$", "", relay_url.rstrip("/"))
+        desired = UpstreamConfig(
+            url=normalized,
+            engine="openai",
+            protocol="openai-chat",
+            via=self.name,
+        )
+        if cfg.upstreams.get(_CODEX_RELAY_SLUG) == desired:
+            return
+        cfg.upstreams[_CODEX_RELAY_SLUG] = desired
+        path = save_config(cfg)
+        result.changed_files.append(path)
+        result.notes.append(f"captured Codex provider relay as upstream {_CODEX_RELAY_SLUG!r} → {normalized}")
+
     def install(self) -> InstallResult:
         auth_mode = _detect_auth_mode(self.auth_json_path)
         original = (
@@ -311,7 +372,24 @@ class CodexInstaller(AgentInstaller):
             previous = prepared.previous_model_provider
         text = prepared.text
 
-        provider_url = self._provider_url(auth_mode)
+        # In API-key mode, if the previous provider had a custom (non-OpenAI)
+        # base_url — e.g. a relay cc-switch wrote — capture it so the gateway
+        # forwards there instead of api.openai.com. Best-effort: any parse miss
+        # falls back to the fixed openai upstream (no regression).
+        relay_url: str | None = None
+        if auth_mode != "chatgpt" and previous:
+            m = _PROVIDER_NAME_RE.search(previous)
+            if m:
+                candidate = _extract_provider_base_url(original, m.group(1))
+                if candidate and not any(h in candidate for h in _OFFICIAL_OPENAI_HINTS):
+                    relay_url = candidate
+
+        if auth_mode == "chatgpt":
+            provider_url = self._provider_url(auth_mode)
+        elif relay_url is not None:
+            provider_url = f"{self.proxy_url.rstrip('/')}/_h/codex/upstreams/{_CODEX_RELAY_SLUG}/v1"
+        else:
+            provider_url = self._provider_url(auth_mode)
         prev_marker = previous if previous is not None else _ABSENT
         root = (
             _ROOT_BEGIN +
@@ -341,6 +419,8 @@ class CodexInstaller(AgentInstaller):
         # init codex` on a machine that lost ~/.telos/config.json self-heals.
         if auth_mode == "chatgpt":
             self._ensure_chatgpt_upstream(result)
+        elif relay_url is not None:
+            self._ensure_codex_upstream(relay_url, result)
 
         if orphan_text:
             result.notes.append(

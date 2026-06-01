@@ -6,6 +6,7 @@ Subcommands:
 - ``telos <harness>``     directly enter a harness (claude-code / codex / openclaw / hermes)
 - ``telos init``          auto-detect harnesses → inject → start gateway in background → print dashboard
 - ``telos uninstall``     undo the injection from ``telos init`` (per-harness with ``--harness``; ``--purge`` fully removes telos)
+- ``telos ccswitch``      coexist with cc-switch: ``status`` / ``sync`` (re-chain telos in front of cc-switch's active provider)
 - ``telos gateway``       start / stop / view the gateway
 - ``telos dashboard``     open the dashboard in a browser (``restart`` cycles the gateway serving it)
 - ``telos status``        one-shot overview: harness injection + gateway + traffic forwarding
@@ -61,6 +62,8 @@ def main(argv: list[str] | None = None) -> int:
     if subcommand == "uninstall":
         from telos.init.__main__ import uninstall_main
         return uninstall_main(rest)
+    if subcommand == "ccswitch":
+        return _cmd_ccswitch(rest)
     if subcommand == "dashboard":
         return _cmd_dashboard(rest)
     if subcommand == "status":
@@ -106,6 +109,117 @@ def _ensure_gateway(*, auto_start: bool = True):
     except RuntimeError as e:
         print(f"error: failed to start gateway: {e}", file=sys.stderr)
         return None
+
+
+# ---------------------------------------------------------------------------
+# telos ccswitch  (coexist with cc-switch: https://github.com/farion1231/cc-switch)
+# ---------------------------------------------------------------------------
+
+def _cmd_ccswitch(rest: list[str]) -> int:
+    """``telos ccswitch [status|sync]``.
+
+    cc-switch and telos write the same live harness configs. ``status`` reports
+    whether cc-switch is installed, which provider it has active, and whether
+    telos is currently chained in front of each harness. ``sync`` is the
+    on-demand reconcile: after switching providers in cc-switch, it re-captures
+    the now-live relay for every detected harness and re-injects telos's gateway
+    route (chaining telos in front of cc-switch's choice).
+    """
+    verb = rest[0] if rest else "status"
+    if verb not in ("status", "sync"):
+        print(f"error: unknown ccswitch verb {verb!r}; expected 'status' or 'sync'",
+              file=sys.stderr)
+        return 2
+
+    from telos.config import load_config
+    from telos.harnesses import detect_installed
+    from telos.init import cc_switch
+
+    if verb == "status":
+        return _cmd_ccswitch_status()
+
+    # --- sync: reconcile every detected harness against the live config ---
+    cfg = load_config()
+    gateway_url = _resolve_inject_url(cfg)
+    detected = [s.name for s in detect_installed(cfg.harness_executables)]
+    if not detected:
+        print("No installed harness CLI detected; nothing to sync.")
+        return 0
+    if not cc_switch.is_installed():
+        print("note: cc-switch not detected; syncing telos injection for detected harnesses anyway.\n")
+
+    from telos.init import INSTALLERS
+    from telos.init.__main__ import _render
+
+    rc = 0
+    config_changed = False
+    from telos.config import config_path
+    telos_cfg_path = config_path()
+    for name in detected:
+        if name not in INSTALLERS:
+            continue
+        try:
+            result = INSTALLERS[name](proxy_url=gateway_url).install()
+        except Exception as e:  # noqa: BLE001
+            print(f"[{name}] error: {e}", file=sys.stderr)
+            rc = 1
+            continue
+        print(_render(result))
+        if telos_cfg_path in result.changed_files:
+            config_changed = True
+
+    # Restart the gateway if upstreams changed so the new relay slugs take effect.
+    _restart_gateway_if_running(config_changed)
+    return rc
+
+
+def _cmd_ccswitch_status() -> int:
+    from telos.config import load_config
+    from telos.harnesses import HARNESS_NAMES
+    from telos.init import cc_switch
+
+    installed = cc_switch.is_installed()
+    print(f"cc-switch: {'detected at ' + str(cc_switch.ccswitch_home()) if installed else 'not detected'}")
+    if installed:
+        dev = cc_switch.read_device_settings()
+        if dev.current_provider_claude:
+            print(f"  active Claude provider: {dev.current_provider_claude}")
+        if dev.current_provider_codex:
+            print(f"  active Codex provider:  {dev.current_provider_codex}")
+
+    cfg = load_config()
+    gateway_url = _resolve_inject_url(cfg)
+    print("\nharness chaining state:")
+    for name in HARNESS_NAMES:
+        st = cc_switch.classify_harness(name, proxy_url=gateway_url)
+        print(f"  {name:<12} {st.state:<14} {st.note}")
+    if installed:
+        print("\nAfter switching a provider in cc-switch, run `telos ccswitch sync` "
+              "to chain telos in front of the new choice.")
+    return 0
+
+
+def _resolve_inject_url(cfg) -> str:
+    """URL the injected configs should point at: the running daemon if any, else config default."""
+    try:
+        from telos.gateway import daemon
+        state = daemon.read_state()
+    except Exception:  # noqa: BLE001
+        state = None
+    return state.base_url() if state is not None else cfg.gateway.base_url()
+
+
+def _restart_gateway_if_running(config_changed: bool) -> None:
+    from telos.gateway import daemon
+    state = daemon.read_state()
+    if state is None:
+        return
+    if config_changed:
+        try:
+            state = daemon.restart()
+            print(f"\n✓ gateway restarted to pick up the new upstreams → {state.base_url()}")
+        except RuntimeError as e:
+            print(f"warning: gateway failed to restart: {e}", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -626,6 +740,7 @@ def _print_usage() -> None:
         "  <harness>   directly enter a harness (claude-code / codex / openclaw / hermes)\n"
         "  init        auto-detect harnesses, inject config, start the gateway\n"
         "  uninstall   undo the injection from 'init' (all harnesses, or one via --harness; --purge fully removes telos)\n"
+        "  ccswitch    coexist with cc-switch: status (is it active, is telos chained) | sync (re-chain after a switch)\n"
         "  gateway     start / stop / view the gateway (start|stop|status|restart)\n"
         "  dashboard   open the saved-token / saved-$ dashboard in a browser (dashboard restart restarts it; dashboard reset zeroes it)\n"
         "  status      one-shot overview of harness injection, the gateway, and traffic forwarding (--json for machine-readable)\n"

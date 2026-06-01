@@ -115,6 +115,23 @@ telos dashboard
 
 <sub>还想接别的 harness 或模型后端？TELOS 是 adapter 驱动的：保留同一份 IR，新增 engine / harness 适配器即可，不需要重写 agent 逻辑。</sub>
 
+### 与 cc-switch 共存
+
+[cc-switch](https://github.com/farion1231/cc-switch) 是一个流行的桌面工具，通过改写 Claude Code / Codex / OpenClaw / Hermes 的本地配置文件来切换 provider —— 改写的正是 TELOS 也在写的那些文件。两者是**可组合而非互斥**的：cc-switch 负责选**哪个上游中转**，TELOS 是一个挡在**任意上游前面**的省 token 网关：
+
+```
+Claude Code ──▶ TELOS 网关 (127.0.0.1:7171) ──▶ cc-switch 选定的中转
+```
+
+执行 `telos init`（或 `telos ccswitch sync`）时，TELOS 会把 cc-switch 当前激活的中转捕获为自己的一个 upstream，并把 harness 重新指向网关路由。中转的鉴权 token 原样保留 —— 它随请求头直接穿过网关，**不会有任何密钥被写入 TELOS 配置**。
+
+```bash
+telos ccswitch status   # cc-switch 是否存在、当前激活哪个 provider、TELOS 是否已挡在前面
+telos ccswitch sync     # 在 cc-switch 切换 provider 后，重新把 TELOS 挂到前面
+```
+
+由于 cc-switch 每次切换都会热改写本地配置，在 cc-switch 里切换 provider 之后请运行 `telos ccswitch sync`（先在 cc-switch 切换，再 sync）。`telos uninstall` 会把 cc-switch 期望的原始中转地址还原回去。
+
 ---
 
 <a id="why-telos"></a>

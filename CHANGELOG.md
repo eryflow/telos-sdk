@@ -7,6 +7,36 @@ The format follows Keep a Changelog; dates are absolute.
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **`telos ccswitch`** — coexistence with [cc-switch](https://github.com/farion1231/cc-switch),
+  the desktop provider manager that writes the same live harness configs TELOS
+  writes. `telos ccswitch status` reports whether cc-switch is installed, which
+  provider it has active, and whether TELOS is chained in front of each harness;
+  `telos ccswitch sync` is the on-demand reconcile that re-chains TELOS in front
+  of cc-switch's current choice after a switch. `telos init` now prints a notice
+  when cc-switch is detected.
+- **Claude Code relay capture** — when `ANTHROPIC_BASE_URL` already points at a
+  third-party relay (e.g. one cc-switch selected), the installer now registers
+  that relay as an owned upstream (`claude-code-upstream`) and chains the gateway
+  in front of it, instead of silently forwarding the relay's traffic to
+  `api.anthropic.com`. The relay's `ANTHROPIC_AUTH_TOKEN` is left untouched and
+  forwarded via the request header, so no secret is stored in TELOS config.
+- **Codex relay capture** — in API-key mode, a custom provider `base_url` in
+  `~/.codex/config.toml` is captured as `codex-upstream` rather than dropped.
+
+### Fixed
+
+- **Install-marker robustness** — a co-manager (observed: cc-switch's "backfill
+  from live" sync) can coerce TELOS's boolean `__telos_installed` marker into the
+  string `"true"`. Detection now accepts both and every install rewrites the
+  marker as a real boolean, fixing a false "not connected" status and preventing
+  TELOS's own gateway route from being saved into `__telos_previous_base_url`.
+
+---
+
 ## [0.1.7] — 2026-05-31
 
 ### Added

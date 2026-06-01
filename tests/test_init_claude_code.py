@@ -3,10 +3,31 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from pathlib import Path
 
+import pytest
+
+from telos.config import load_config
 from telos.init.claude_code import ClaudeCodeInstaller
+
+_RELAY_ROUTE = "http://127.0.0.1:7171/_h/claude-code/upstreams/claude-code-upstream"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_telos_home(tmp_path: Path):
+    """Point TELOS_HOME at a clean temp dir so relay capture never touches the
+    real ~/.telos/config.json."""
+    prev = os.environ.get("TELOS_HOME")
+    os.environ["TELOS_HOME"] = str(tmp_path / "telos-home")
+    try:
+        yield
+    finally:
+        if prev is None:
+            os.environ.pop("TELOS_HOME", None)
+        else:
+            os.environ["TELOS_HOME"] = prev
 
 
 def _new_settings_path() -> Path:
@@ -47,14 +68,21 @@ def test_install_preserves_existing_settings() -> None:
 
 
 def test_install_preserves_user_anthropic_base_url() -> None:
+    """A third-party relay base_url is captured as an upstream and the gateway
+    is chained in front of it (not silently routed to api.anthropic.com)."""
     p = _new_settings_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps({"env": {"ANTHROPIC_BASE_URL": "https://my.proxy/"}}))
     inst = ClaudeCodeInstaller(settings_path=p, proxy_url="http://127.0.0.1:7171")
     inst.install()
     data = _read(p)
-    assert data["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:7171/_h/claude-code"
+    assert data["env"]["ANTHROPIC_BASE_URL"] == _RELAY_ROUTE
     assert data["env"]["__telos_previous_base_url"] == "https://my.proxy/"
+    # the relay is registered as an owned upstream so the gateway forwards to it
+    up = load_config().upstreams["claude-code-upstream"]
+    assert up.url == "https://my.proxy"
+    assert up.via == "claude-code"
+    assert up.protocol == "anthropic-messages"
     print("✓ test_install_preserves_user_anthropic_base_url")
 
 
@@ -152,8 +180,54 @@ def test_reinstall_with_new_url_keeps_original_previous() -> None:
     ClaudeCodeInstaller(settings_path=p, proxy_url="http://127.0.0.1:9999").install()
     data = _read(p)
     assert data["env"]["__telos_previous_base_url"] == "https://orig/"
-    assert data["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:9999/_h/claude-code"
+    assert data["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:9999/_h/claude-code/upstreams/claude-code-upstream"
     print("✓ test_reinstall_with_new_url_keeps_original_previous")
+
+
+def test_string_marker_is_recognized_and_self_heals() -> None:
+    """Regression: a co-manager (cc-switch's backfill) can coerce our boolean
+    __telos_installed marker into the string "true". Detection must still treat
+    the harness as managed, install must be a no-op-ish self-heal (not pollute
+    __telos_previous_base_url with our own route), and the marker must be
+    rewritten as a real boolean."""
+    p = _new_settings_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    route = "http://127.0.0.1:7171/_h/claude-code"
+    p.write_text(json.dumps({"env": {
+        "ANTHROPIC_BASE_URL": route, "__telos_installed": "true"}}))
+    inst = ClaudeCodeInstaller(settings_path=p, proxy_url="http://127.0.0.1:7171")
+    assert inst.status().already_installed is True
+    inst.install()
+    data = _read(p)
+    assert data["env"]["__telos_installed"] is True  # self-healed to boolean
+    assert "__telos_previous_base_url" not in data["env"]  # our route not preserved as "original"
+    assert data["env"]["ANTHROPIC_BASE_URL"] == route
+    print("✓ test_string_marker_is_recognized_and_self_heals")
+
+
+def test_ccswitch_relay_capture_round_trip() -> None:
+    """Simulate cc-switch having written a relay + token: install captures the
+    relay as an upstream, keeps the token, and uninstall fully reverts (relay
+    restored, upstream slug dropped)."""
+    p = _new_settings_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"env": {
+        "ANTHROPIC_BASE_URL": "https://relay.example/api/v1",
+        "ANTHROPIC_AUTH_TOKEN": "ccs-secret",
+    }}))
+    inst = ClaudeCodeInstaller(settings_path=p, proxy_url="http://127.0.0.1:7171")
+    inst.install()
+    data = _read(p)
+    assert data["env"]["ANTHROPIC_BASE_URL"] == _RELAY_ROUTE
+    assert data["env"]["ANTHROPIC_AUTH_TOKEN"] == "ccs-secret"  # token left for header passthrough
+    up = load_config().upstreams["claude-code-upstream"]
+    assert up.url == "https://relay.example/api"  # trailing /v1 stripped
+    inst.uninstall()
+    data = _read(p)
+    assert data["env"]["ANTHROPIC_BASE_URL"] == "https://relay.example/api/v1"
+    assert data["env"]["ANTHROPIC_AUTH_TOKEN"] == "ccs-secret"
+    assert "claude-code-upstream" not in load_config().upstreams
+    print("✓ test_ccswitch_relay_capture_round_trip")
 
 
 def main() -> None:
@@ -162,6 +236,8 @@ def main() -> None:
     test_install_preserves_user_anthropic_base_url()
     test_install_preserves_other_tool_with_same_url()
     test_reinstall_with_new_url_keeps_original_previous()
+    test_string_marker_is_recognized_and_self_heals()
+    test_ccswitch_relay_capture_round_trip()
     test_install_is_idempotent()
     test_uninstall_restores_state()
     test_uninstall_removes_env_block_if_empty()
