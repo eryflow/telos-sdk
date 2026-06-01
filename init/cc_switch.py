@@ -108,6 +108,73 @@ def _read_claude_base_url() -> str | None:
     return None
 
 
+def _read_codex_base_url() -> str | None:
+    """Live ``base_url`` of Codex's active custom provider (``~/.codex/config.toml``)."""
+    from telos.init import codex
+
+    try:
+        text = codex._default_config_path().read_text(encoding="utf-8")
+    except OSError:
+        return None
+    m = codex._PROVIDER_NAME_RE.search(text)
+    if not m:
+        return None
+    return codex._extract_provider_base_url(text, m.group(1))
+
+
+def _read_openclaw_base_url() -> str | None:
+    """Live ``baseUrl`` of OpenClaw's primary provider (``~/.openclaw/openclaw.json``)."""
+    from telos.init import openclaw
+
+    try:
+        data = json.loads(openclaw._default_config_path().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    pid = openclaw._primary_provider_id(data)
+    if not pid:
+        return None
+    info = openclaw._provider_info(data, pid)
+    return info.base_url if info is not None else None
+
+
+def _read_hermes_base_url() -> str | None:
+    """Live ``base_url`` of Hermes's top-level model block (``~/.hermes/config.yaml``)."""
+    import yaml
+
+    from telos.init import hermes
+
+    try:
+        data = yaml.safe_load(hermes._default_config_path().read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    model = data.get("model")
+    if not isinstance(model, dict):
+        return None
+    base_url = model.get("base_url")
+    return base_url if isinstance(base_url, str) and base_url else None
+
+
+# Per-harness live base_url readers. Lets :func:`classify_harness` tell a
+# third-party relay apart from the official endpoint for *every* harness, not
+# only claude-code (each reader reuses its installer's own config parser and
+# returns ``None`` on any missing/malformed file).
+_LIVE_BASE_URL_READERS = {
+    "claude-code": _read_claude_base_url,
+    "codex": _read_codex_base_url,
+    "openclaw": _read_openclaw_base_url,
+    "hermes": _read_hermes_base_url,
+}
+
+
+def _read_live_base_url(name: str) -> str | None:
+    reader = _LIVE_BASE_URL_READERS.get(name)
+    return reader() if reader is not None else None
+
+
 def classify_harness(name: str, *, proxy_url: str = "http://127.0.0.1:7171") -> HarnessState:
     """Classify a harness's current provider state from its live config.
 
@@ -125,7 +192,7 @@ def classify_harness(name: str, *, proxy_url: str = "http://127.0.0.1:7171") -> 
         except Exception:  # noqa: BLE001 — a broken config shouldn't crash detection
             chained = False
 
-    live = _read_claude_base_url() if name == "claude-code" else None
+    live = _read_live_base_url(name)
 
     if chained:
         return HarnessState(name, TELOS_CHAINED, live, "telos gateway is chained in front")

@@ -25,6 +25,8 @@ def env(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("CC_SWITCH_HOME", str(tmp_path / "cc-switch"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    monkeypatch.setenv("OPENCLAW_HOME", str(tmp_path / "openclaw"))
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
     monkeypatch.setenv("TELOS_HOME", str(tmp_path / "telos-home"))
     return tmp_path
 
@@ -94,6 +96,74 @@ def test_classify_telos_chained(env) -> None:
 def test_classify_absent(env) -> None:
     st = cc_switch.classify_harness("claude-code")  # no settings.json
     assert st.state == cc_switch.ABSENT
+
+
+# --- classify_harness for non-claude harnesses ----------------------------
+# Regression: classify_harness used to read a live base_url only for
+# claude-code, so codex / openclaw / hermes always collapsed to ABSENT (or
+# TELOS_CHAINED) and could never report RELAY_ACTIVE / OFFICIAL — which made
+# `telos ccswitch status` useless for 3 of the 4 harnesses. These cover the
+# per-harness live-base_url readers.
+
+def _write_codex_provider(env, base_url: str, provider: str = "myrelay") -> None:
+    codex = env / "codex"
+    codex.mkdir(parents=True, exist_ok=True)
+    (codex / "config.toml").write_text(
+        f'model_provider = "{provider}"\n\n'
+        f'[model_providers.{provider}]\n'
+        f'base_url = "{base_url}"\n'
+        'wire_api = "chat"\n'
+    )
+
+
+def _write_openclaw_provider(env, base_url: str, pid: str = "myrelay") -> None:
+    oc = env / "openclaw"
+    oc.mkdir(parents=True, exist_ok=True)
+    (oc / "openclaw.json").write_text(json.dumps({
+        "agents": {"defaults": {"model": {"primary": f"{pid}/some-model"}}},
+        "models": {"providers": {pid: {"baseUrl": base_url, "api": "openai-completions"}}},
+    }))
+
+
+def _write_hermes_provider(env, base_url: str) -> None:
+    h = env / "hermes"
+    h.mkdir(parents=True, exist_ok=True)
+    (h / "config.yaml").write_text(
+        f'model:\n  provider: custom\n  base_url: "{base_url}"\n'
+    )
+
+
+def test_classify_codex_relay_active(env) -> None:
+    _write_codex_provider(env, "https://relay.packy.io/v1")
+    st = cc_switch.classify_harness("codex")
+    assert st.state == cc_switch.RELAY_ACTIVE
+    assert st.live_base_url == "https://relay.packy.io/v1"
+
+
+def test_classify_codex_official(env) -> None:
+    _write_codex_provider(env, "https://api.openai.com/v1")
+    assert cc_switch.classify_harness("codex").state == cc_switch.OFFICIAL
+
+
+def test_classify_openclaw_relay_active(env) -> None:
+    _write_openclaw_provider(env, "https://relay.example/api")
+    st = cc_switch.classify_harness("openclaw")
+    assert st.state == cc_switch.RELAY_ACTIVE
+    assert st.live_base_url == "https://relay.example/api"
+
+
+def test_classify_hermes_relay_active(env) -> None:
+    _write_hermes_provider(env, "https://relay.example/v1")
+    st = cc_switch.classify_harness("hermes")
+    assert st.state == cc_switch.RELAY_ACTIVE
+    assert st.live_base_url == "https://relay.example/v1"
+
+
+def test_classify_non_claude_absent_without_config(env) -> None:
+    # No codex/openclaw/hermes config at all → ABSENT (the readers must not
+    # raise on missing files, and must not mis-report a relay).
+    for name in ("codex", "openclaw", "hermes"):
+        assert cc_switch.classify_harness(name).state == cc_switch.ABSENT
 
 
 # --- Codex relay capture --------------------------------------------------
