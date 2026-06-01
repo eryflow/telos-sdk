@@ -205,6 +205,19 @@ def main(argv: list[str] | None = None) -> int:
     if not args.status and not args.no_gateway and rc == 0:
         _start_gateway(config_changed=config_changed)
 
+    # ---- cc-switch coexistence notice ----
+    if not args.status:
+        try:
+            from telos.init import cc_switch
+            if cc_switch.is_installed():
+                print()
+                print("ℹ cc-switch detected. telos chains its gateway in front of whichever "
+                      "provider cc-switch has active.")
+                print("  After switching providers in cc-switch, run `telos ccswitch sync` "
+                      "to re-chain telos in front of the new choice.")
+        except Exception:  # noqa: BLE001 — never let the notice break init
+            pass
+
     return rc
 
 

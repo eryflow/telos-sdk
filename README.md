@@ -127,6 +127,23 @@ Opens an offline HTML dashboard in your browser showing savings per call in abso
 
 <sub>Need another harness or model backend? TELOS is adapter-driven: keep the same IR and add an engine/harness adapter without rewriting your agent logic.</sub>
 
+### Coexisting with cc-switch
+
+[cc-switch](https://github.com/farion1231/cc-switch) is a popular desktop manager that switches Claude Code / Codex / OpenClaw / Hermes between providers by writing the **same** live config files TELOS writes. The two are **composable, not exclusive** — cc-switch picks *which upstream relay*, TELOS is a token-optimizing gateway that sits *in front of any upstream*:
+
+```
+Claude Code ──▶ TELOS gateway (127.0.0.1:7171) ──▶ cc-switch's chosen relay
+```
+
+On `telos init` (or `telos ccswitch sync`), TELOS captures whatever relay cc-switch has active into an owned upstream and re-points the harness at its gateway route. The relay's auth token is left in place — it rides the request header straight through the gateway, so **no secret is ever copied into TELOS config**.
+
+```bash
+telos ccswitch status   # is cc-switch present, which provider is active, is TELOS chained?
+telos ccswitch sync     # after switching a provider in cc-switch, re-chain TELOS in front
+```
+
+Because cc-switch hot-rewrites the live config on every switch, run `telos ccswitch sync` after changing providers there (switch in cc-switch first, then sync). `telos uninstall` restores the original relay value cc-switch expects.
+
 ---
 
 <a id="why-telos"></a>
