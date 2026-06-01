@@ -1,0 +1,103 @@
+---
+title: "开发者页"
+description: "实时内存诊断视图——IR 结构、PIN/FOLD/DROP 分布、缓存断点槽位与逐工具统计。"
+icon: "bug"
+---
+
+开发者页是节省看板的工程师对应面。它渲染来自 `SessionInspector` 的**实时内存状态**，每次 GET 重新渲染，
+进程重启即丢失。
+
+```
+GET /__telos/developer        # HTML
+GET /__telos/developer.json   # JSON
+```
+
+## 会话列表
+
+按 `last_seen` 降序：
+
+| 列 | 含义 |
+|---|---|
+| `session_id` | 会话标识；点击进入详情 |
+| `model` | 最近请求的 `ir.hints.model` |
+| `harness` | 最近识别的 harness（`hermes` / `openclaw` / `passthrough`）|
+| `calls` | 观察到的调用数（上限 `INSPECTOR_HISTORY=25`，超出则丢最旧）|
+| `tool calls` | assistant 发起的 `tool_use` 块总数 |
+| `distinct tools` | 唯一工具名数 |
+| `tool_result chars` | 所有 `tool_result` 内容的累积字符数 |
+| `last seen` | 距上次调用的相对时间 |
+
+## 缓存断点槽位（BP-\*）
+
+Anthropic 只允许 4 个 `cache_control` 断点，按下表优先级裁剪。物理顺序由 `tools → system → messages`
+保证，因此长 TTL（1h）自然先于短（5m）。
+
+| 槽位 | 位置 | TTL | 触发 |
+|---|---|---|---|
+| **BP-T** | `tools` 段最后一块 | 1h | 请求带 `tools` |
+| **BP-S** | `system` 最后一个 **PIN** 块 | 1h | system 有 PIN 块（不含 ref-pool）|
+| **BP-R** | `system` 最后一个 **FOLD** 块 | 1h | system 有 FOLD 块（ref-pool 末尾）|
+| **BP-mid** | `messages[len-19]` 内最后一个非 DROP 块 | 5m | `len(messages) ≥ 19`（修复 R2）|
+| **BP-X** | 最后一条消息内最后一个非 DROP 块 | 5m | 存在非空消息 |
+
+优先级：**BP-T > BP-S > BP-R > BP-mid > BP-X**。
+
+## prompt 区域 · 分带分布
+
+每段（`tools` / `system` / `messages`）一根堆叠条，按带着色：
+
+- **P (PIN)** —— 金：system prompt、工具定义、用户问题主体
+- **F (FOLD)** —— 蓝：ref-pool、上一轮 `tool_result`、assistant 历史
+- **D (DROP)** —— 灰：每轮 envelope（`<system-reminder>`、`<environment_info>`、时间戳）
+
+每个标题显示该段总字符数、各带的 `(字符, 块)`，以及逐轮增量（红 `+N` = 增长，绿 `−N` = 收缩）。
+
+## 最近调用
+
+每行是一次调用的快照（保留最近 25 次）：
+
+| 列 | 含义 |
+|---|---|
+| `#` | 调用序号（自会话开始单调递增）|
+| `lat` | 调用延迟（秒）|
+| `raw_in` / `cache_read` / `cache_write` / `output` | 归一化 usage 四元组 |
+| `tools / system / messages chars · Δ` | 各段字符数 + 与上轮的差 |
+| `plan slots` | 本轮实际放置的 BP 槽位名 |
+| `uses` / `results` | 本轮 `tool_use` 块数 / `tool_result` 块数 |
+
+<Note>
+  `uses` 与 `results` 在时间上错一轮：assistant 在第 N 轮发起的 `tool_use` 一般要等到第 N+1 轮的 user 才把
+  `tool_result` 送回。
+</Note>
+
+## 最新 IR · 逐消息块
+
+最近请求的 `TelosIR.messages` 快照，按消息序排布。每个块是一枚 pill，如 `P·text 1,234c [openclaw/user-query]`：
+
+| 字段 | 含义 |
+|---|---|
+| 颜色 / 首字母 | 带：**P** 金 = PIN · **F** 蓝 = FOLD · **D** 灰 = DROP |
+| `kind` | `text` / `tool_use` / `tool_result` / `thinking` / `image` / `tool_def` |
+| `Nc` | 块 payload 字符数 |
+| 灰色尾 | `source_tag` 或 `ref_slug`——哪条 harness 规则切出此块 |
+
+## `source_tag` 参考
+
+`source_tag` 前缀是 harness 名，后缀描述切片来源。
+
+| Harness | 段 | 常见标签 |
+|---|---|---|
+| `openclaw` | tools | `openclaw/tools` |
+| `openclaw` | system | `openclaw/system-large` / `openclaw/system-ref-stub` / `openclaw/system` |
+| `openclaw` | messages | `openclaw/tool-result` / `openclaw/assistant-text` / `openclaw/assistant-tool-use` / `openclaw/other` |
+| `hermes` | tools | `hermes/tools` |
+| `hermes` | system | `hermes/system` / `hermes/file-block`（`<file path=…>` 的 > 2KB ref-pool 块）|
+| `hermes` | messages | `hermes/tool-result` / `hermes/assistant-text` / `hermes/assistant-tool-use` / `hermes/thinking` / `hermes/other` |
+| 共享 | user 拆分 | `harness/user-query`(PIN) · `harness/system_reminder` / `command_message` / `command_name` / `env_info` / `current_time`(DROP) · `harness/prev_result`(FOLD) |
+
+若你预期 Claude Code（hermes）却看到 `openclaw/*` 前缀，多半是 `_detect_harness` 误判——见
+[Harness 集成](/zh/guides/harnesses)。
+
+<Card title="节省看板" icon="chart-line" href="/zh/observability/savings-dashboard">
+  给团队其他人看的美元视图。
+</Card>

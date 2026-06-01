@@ -1,0 +1,108 @@
+---
+title: "Changelog"
+description: "User-visible changes to telos-sdk. Format follows Keep a Changelog; dates are absolute."
+icon: "clock-rotate-left"
+---
+
+<Update label="0.1.7" description="2026-05-31">
+  **Added**
+  - **`telos status`** — shows gateway running state, per-harness install status, and live traffic in
+    one place (`--json` for machine-readable output).
+  - **`telos uninstall`** — removes the proxy injection from the detected (or specified) harness and
+    restores the original config.
+  - **`telos version` / `telos -V`** — prints the installed SDK version.
+
+  **Fixed**
+  - Gateway URL resolution in `telos status` / `telos uninstall` on non-default ports or behind a
+    custom `ANTHROPIC_BASE_URL`.
+  - **Claude TTL block ordering** — `ttl: "1h"` blocks were emitted after `ephemeral` (5m) blocks in
+    some tool-heavy sessions, violating Anthropic's ordering and triggering HTTP 400. Fixed by enforcing
+    the long-before-short invariant in `AnthropicAdapter.plan_marks`.
+  - **Codex HTML passthrough guard** — the `/v1/responses` upstream now converts accidental HTML error
+    responses (e.g. 403 Cloudflare pages) to structured JSON.
+  - Uninstall / harness CLI hardening (partial configs, external rewrites, typo suggestions).
+
+  **Changed**
+  - Test suite 228 → 272 (all green): refpool slug-freeze invariants, bridge canonicalization
+    determinism, Anthropic BP-trim priority.
+  - CI matrix now runs Python 3.10 / 3.11 / 3.12 / 3.13 on every push/PR.
+</Update>
+
+<Update label="0.1.6" description="2026-05-29">
+  **Fixed**
+  - **`telos init` now restarts the gateway when an installer registers a new upstream.** Previously,
+    adding a slug (e.g. `codex-chatgpt`) to a running daemon kept 404ing with `unknown upstream slug`
+    until a manual `telos gateway restart`. `init/__main__.py` now detects the config mutation and
+    calls `daemon.restart()`.
+</Update>
+
+<Update label="0.1.5" description="2026-05-28">
+  **Changed**
+  - Live dashboard separated from replay comparisons — distinguishes live gateway traffic from A/B
+    replay results, with refreshed branding.
+
+  **Fixed**
+  - Uninstall correctly removes Codex / Hermes / OpenClaw harness configs; install method updates for
+    each.
+</Update>
+
+<Update label="0.1.4" description="2026-05-27">
+  Codex (`wire_api = "responses"`) is now a first-class harness on the gateway.
+
+  **Fixed**
+  - **Codex.app with ChatGPT login could not reach the gateway** — the installer assumed an API-key
+    provider. It now reads `~/.codex/auth.json` and, when `auth_mode = "chatgpt"`, routes through a new
+    `codex-chatgpt` upstream pointing at `https://chatgpt.com/backend-api/codex`. API-key mode unchanged.
+
+  **Added**
+  - **Dashboard shows Codex traffic** — the Responses-API endpoint parses the terminal
+    `response.completed` SSE event and normalizes usage; `registry.py` adds the `codex` display name.
+</Update>
+
+<Update label="0.1.3" description="2026-05-22">
+  Patch release published to PyPI: version bump, refreshed metadata, LEAP Lab attribution in the
+  README headers (English and Chinese).
+</Update>
+
+<Update label="0.1.x" description="2026-05-18 · gateway rework">
+  Upgrades `proxy` into a "gateway + multi-harness manager": one-command install, one-command
+  integration, and bare `telos` drops you into your usual harness.
+
+  **Added**
+  - **`telos init` (no arguments)**, **`telos gateway start|stop|status|restart`**, bare
+    **`telos` / `telos <harness>`**, **`telos alias`**, **`telos mode`** (hot-reload), **`telos
+    dashboard`**, **`~/.telos/config.json`**, the loopback control endpoint
+    `GET/POST /__telos/control/mode`, and a Homebrew formula template.
+
+  **Changed**
+  - `proxy` renamed to **gateway** for users (`telos proxy` kept as a hidden alias); `--agent` →
+    `--harness`, `--proxy-url` → `--gateway-url`; new codex / openclaw / hermes installers.
+</Update>
+
+<Update label="0.1.x" description="2026-05-14 · proxy + cross-turn state">
+  Two themes: **a zero-intrusion integration path (HTTP reverse proxy)** and **real cross-turn state
+  accumulation**.
+
+  **Added**
+  - **`telos.output_filter`** — RTK-style tool-result filtering with the `TelosMode` four-state switch.
+  - **`telos.corpus`** + **`telos.replay`** — record real sessions and replay them per mode for
+    controlled comparison.
+  - **`telos.proxy`** — an aiohttp SSE-aware Anthropic reverse proxy with an LRU session registry.
+  - **`telos.init`** — agent config injector (Claude Code / generic).
+  - **`TelosAnthropicTransport`**, **`BridgeSessionState`**, **`Bridge.emit_with_plan()`**,
+    **`RefPool.register_or_skip`**, **`ir.enforce_band_order`**, stable content-derived session-id, and
+    observable `cumulative` accumulation fields. 8 new test suites (45 functions).
+
+  **Fixed**
+  - harness §5 ordering violation on multi-block user messages; a canonicalize bug that skipped
+    `_canonicalize_ir` (silently breaking the prefix cache); multi-turn Bridge state always zeroed; the
+    proxy 500 storm (now degrades to passthrough; `--strict` restores 500); proxy log noise.
+</Update>
+
+<Update label="0.1.0" description="2026-05-06 · initial public release">
+  - Python reference implementation of the TELOS protocol.
+  - 3 harness plugins (`openclaw` / `hermes` / `telos`); 5 engine adapters (`anthropic` / `openai` /
+    `deepseek` / `vllm` / `sglang`).
+  - `Bridge` 5 primitives; `BidirectionalEngineAdapter` mixin for vLLM / SGLang; `TelosOpenAITransport`;
+    `test_smoke.py` covering the R1–R8 fix points.
+</Update>

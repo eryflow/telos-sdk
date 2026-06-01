@@ -1,0 +1,111 @@
+---
+title: "安装"
+description: "从 PyPI、一行脚本或源码安装 TELOS——附环境要求与一条命令完成集成。"
+icon: "download"
+---
+
+## 环境要求
+
+- **Python ≥ 3.10**（CI 跑 3.10–3.13 矩阵）。
+- 依赖：`anthropic ≥ 0.49`、`openai ≥ 1.72`、`aiohttp ≥ 3.10`（自动安装）。
+
+## 安装
+
+<Tabs>
+  <Tab title="一行脚本">
+    ```bash
+    # Linux / macOS / WSL2 / Android (Termux)
+    curl -fsSL https://raw.githubusercontent.com/learningCatHD/telos-sdk/main/scripts/install.sh | bash
+    ```
+  </Tab>
+  <Tab title="pip">
+    ```bash
+    pip install -U telos-sdk
+    ```
+  </Tab>
+  <Tab title="源码">
+    ```bash
+    git clone https://github.com/learningCatHD/telos-sdk.git
+    cd telos-sdk
+    python3.11 -m venv .venv
+    source .venv/bin/activate
+    pip install -e .
+    ```
+    `pyproject.toml` 将项目根目录映射到 `telos` 包。
+  </Tab>
+</Tabs>
+
+验证安装：
+
+```bash
+python -c "import telos; print(telos.__file__)"
+# .../telos-sdk/__init__.py
+
+telos --help
+# usage: telos [<subcommand>] [...]
+
+telos version    # 或：telos -V
+```
+
+## 一条命令完成集成（推荐）
+
+```bash
+telos init
+```
+
+无参数时，`telos init` 自动探测本机安装的 harness CLI（claude-code / codex / openclaw / hermes），向每个
+注入指向本地网关的配置，在后台启动网关，并打印网关与看板地址。
+
+<Note>
+  这是 **路径 B（代理）** 的方式。如需进程内集成，见 [路径 A · SDK 传输](/zh/guides/sdk-transport)。
+</Note>
+
+### 仅集成单个 harness
+
+```bash
+telos init --harness claude-code     # 仅操作 Claude Code
+telos init --harness claude-code --status   # 只查看，不修改文件
+```
+
+对 Claude Code，会写入 `~/.claude/settings.json` 的 `env` 字段：
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:7171",
+    "__telos_installed": true
+  }
+}
+```
+
+此后任何启动 Claude Code 的进程都会自动走本地网关——**不改 npm 包**、**不改 PATH**、且 **`npm update`
+不会丢失**。
+
+### 撤销 / 查看状态
+
+```bash
+telos uninstall --harness claude-code     # 恢复安装前状态
+telos status                              # 一处查看网关 + 各 harness 安装 + 实时流量
+telos status --json                       # 机器可读
+```
+
+## 安装到哪些位置
+
+| 路径 | 用途 |
+|---|---|
+| `~/.telos/config.json` | 默认 host / port / mode |
+| `~/.telos/gateway.json` | 后台网关状态（PID、地址）|
+| `~/.telos/gateway.log` | 网关日志 |
+| `~/.telos/usage.jsonl` | 每次调用一行 JSON，喂给看板 |
+| `~/.telos/corpus/<session>.jsonl` | 录制的原始请求，供 replay |
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="快速开始" icon="rocket" href="/zh/start/quickstart">
+    三条命令的完整流程。
+  </Card>
+  <Card title="代理网关" icon="network-wired" href="/zh/guides/proxy-gateway">
+    手动启动、停止与配置网关。
+  </Card>
+</CardGroup>

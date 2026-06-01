@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 280" role="img" aria-label="把 AI 用进生产，谁都撞过这四堵墙">
+  <defs>
+    <linearGradient id="bg2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFF8EE"/>
+      <stop offset="1" stop-color="#FCEFD8"/>
+    </linearGradient>
+  </defs>
+  <rect width="860" height="280" fill="url(#bg2)"/>
+
+  <text x="430" y="34" text-anchor="middle" font-family="Georgia, serif" font-size="17" fill="#7A4A12" font-weight="bold">把 AI 用进生产，谁都撞过这四堵墙</text>
+
+  <g font-family="Helvetica, Arial">
+    <g transform="translate(50,60)">
+      <rect width="180" height="190" rx="12" fill="#FFFFFF" stroke="#d8851f" stroke-opacity="0.5"/>
+      <text x="90" y="36" text-anchor="middle" font-size="30">🔒</text>
+      <text x="90" y="74" text-anchor="middle" font-size="13" fill="#2C5F66" font-weight="bold">被绑死在一家</text>
+      <text x="90" y="105" text-anchor="middle" font-size="11" fill="#555">"换个模型，</text>
+      <text x="90" y="121" text-anchor="middle" font-size="11" fill="#555">就得从头解释。"</text>
+      <line x1="20" y1="142" x2="160" y2="142" stroke="#d8851f" stroke-opacity="0.3"/>
+      <text x="90" y="165" text-anchor="middle" font-size="11" fill="#2C5F66">上下文锁定</text>
+      <text x="90" y="181" text-anchor="middle" font-size="11" fill="#2C5F66">无法搬家</text>
+    </g>
+    <g transform="translate(245,60)">
+      <rect width="180" height="190" rx="12" fill="#FFFFFF" stroke="#d8851f" stroke-opacity="0.5"/>
+      <text x="90" y="36" text-anchor="middle" font-size="30">💸</text>
+      <text x="90" y="74" text-anchor="middle" font-size="13" fill="#2C5F66" font-weight="bold">同一段开头反复付费</text>
+      <text x="90" y="105" text-anchor="middle" font-size="11" fill="#555">"二十轮下来，</text>
+      <text x="90" y="121" text-anchor="middle" font-size="11" fill="#555">每轮都在重算开头。"</text>
+      <line x1="20" y1="142" x2="160" y2="142" stroke="#d8851f" stroke-opacity="0.3"/>
+      <text x="90" y="165" text-anchor="middle" font-size="11" fill="#2C5F66">Token 烧得</text>
+      <text x="90" y="181" text-anchor="middle" font-size="11" fill="#2C5F66">又快又冤</text>
+    </g>
+    <g transform="translate(440,60)">
+      <rect width="180" height="190" rx="12" fill="#FFFFFF" stroke="#d8851f" stroke-opacity="0.5"/>
+      <text x="90" y="36" text-anchor="middle" font-size="30">📝</text>
+      <text x="90" y="74" text-anchor="middle" font-size="13" fill="#2C5F66" font-weight="bold">一个时间戳毁掉缓存</text>
+      <text x="90" y="105" text-anchor="middle" font-size="11" fill="#555">"系统提示词里多了行</text>
+      <text x="90" y="121" text-anchor="middle" font-size="11" fill="#555">currentDate，命中归零。"</text>
+      <line x1="20" y1="142" x2="160" y2="142" stroke="#d8851f" stroke-opacity="0.3"/>
+      <text x="90" y="165" text-anchor="middle" font-size="11" fill="#2C5F66">prefix hash 一污染</text>
+      <text x="90" y="181" text-anchor="middle" font-size="11" fill="#2C5F66">整段缓存作废</text>
+    </g>
+    <g transform="translate(635,60)">
+      <rect width="180" height="190" rx="12" fill="#FFFFFF" stroke="#d8851f" stroke-opacity="0.5"/>
+      <text x="90" y="36" text-anchor="middle" font-size="30">🧾</text>
+      <text x="90" y="74" text-anchor="middle" font-size="13" fill="#2C5F66" font-weight="bold">账单只给一个比例</text>
+      <text x="90" y="105" text-anchor="middle" font-size="11" fill="#555">"省了 3 倍 token，</text>
+      <text x="90" y="121" text-anchor="middle" font-size="11" fill="#555">钱包却没轻多少。"</text>
+      <line x1="20" y1="142" x2="160" y2="142" stroke="#d8851f" stroke-opacity="0.3"/>
+      <text x="90" y="165" text-anchor="middle" font-size="11" fill="#2C5F66">比例可作弊</text>
+      <text x="90" y="181" text-anchor="middle" font-size="11" fill="#2C5F66">绝对 $ 不能</text>
+    </g>
+  </g>
+</svg>

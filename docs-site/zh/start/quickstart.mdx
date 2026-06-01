@@ -1,0 +1,95 @@
+---
+title: "快速开始"
+description: "安装 TELOS、接入你的 harness、查看节省——只需三条命令。"
+icon: "rocket"
+---
+
+TELOS 坐在你的 agent 和模型 API 之间。它改写每个请求，让真正稳定的部分持续命中 KV cache，而不改动引擎
+真正在意的语义字节。三步到位。
+
+<Steps>
+  <Step title="安装">
+    ```bash
+    # Linux / macOS / WSL2 / Android (Termux)
+    curl -fsSL https://raw.githubusercontent.com/learningCatHD/telos-sdk/main/scripts/install.sh | bash
+    ```
+
+    更喜欢 pip？
+
+    ```bash
+    pip install -U telos-sdk
+    ```
+
+    需要 Python ≥ 3.10。从源码安装与依赖详情见[安装](/zh/start/installation)。
+  </Step>
+
+  <Step title="接入">
+    ```bash
+    telos init
+    ```
+
+    无参数时，`telos init` 会：
+
+    - 自动探测本机安装的 harness CLI（**claude-code / codex / openclaw / hermes**），
+    - 向每个注入指向本地网关的配置，
+    - 在后台启动网关（状态写入 `~/.telos/gateway.json`），
+    - 打印网关与看板地址。
+
+    <Note>不改 agent 代码，不改 PATH，且 `npm update` 也不会丢失。</Note>
+  </Step>
+
+  <Step title="观察">
+    ```bash
+    telos dashboard
+    ```
+
+    在浏览器中打开离线 HTML 看板，按**绝对美元**展示每次调用的节省。每次调用都会追加到
+    `~/.telos/usage.jsonl` 并实时聚合。
+
+    <Frame caption="每一笔节省都钉在绝对美元上——无需云端服务器，离线打开。">
+      <img src="/images/05-dashboard.png" alt="TELOS 节省看板" />
+    </Frame>
+  </Step>
+</Steps>
+
+## `telos init` 之后
+
+```bash
+telos              # 选择一个 harness 并进入其 CLI
+telos dashboard    # 在浏览器中打开实时看板
+telos mode both    # 切换优化档位，热重载正在运行的网关
+telos gateway status   # 查看网关运行状态
+```
+
+## 选择集成路径
+
+有两种功能等价的方式把流量路由进 TELOS。
+
+<CardGroup cols={2}>
+  <Card title="路径 B · 代理网关" icon="network-wired" href="/zh/guides/proxy-gateway">
+    零侵入。把 `ANTHROPIC_BASE_URL` 指向本地网关——无需改代码。这正是 `telos init` 所做的。**推荐。**
+  </Card>
+  <Card title="路径 A · SDK 传输" icon="code" href="/zh/guides/sdk-transport">
+    进程内。把你的 `anthropic.Anthropic()` / `openai.OpenAI()` 客户端换成 TELOS 传输；每个
+    `.create()` 调用保持不变。
+  </Card>
+</CardGroup>
+
+## 下一步
+
+<CardGroup cols={3}>
+  <Card title="协议" icon="sparkles" href="/zh/concepts/protocol">
+    理解 cache *为什么*不会被破坏。
+  </Card>
+  <Card title="三色带" icon="layer-group" href="/zh/concepts/bands">
+    PIN / FOLD / DROP，逐一解释。
+  </Card>
+  <Card title="支持矩阵" icon="table" href="/zh/reference/support-matrix">
+    覆盖哪些 harness、模型与框架。
+  </Card>
+</CardGroup>
+
+<Tip>
+  别只信百分比——TELOS 是开源的。在你自己的工作流上跑一遍，看看那 92% 是真的，还是又一个"X 倍 token"
+  的说辞。
+</Tip>

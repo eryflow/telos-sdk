@@ -1,0 +1,254 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" role="img" aria-label="TELOS Token Savings Dashboard · real showcase run, 2026-05-19">
+  <defs>
+    <radialGradient id="bg" cx="20%" cy="0%" r="80%">
+      <stop offset="0" stop-color="#1a2030"/>
+      <stop offset="0.6" stop-color="#0a0d12"/>
+      <stop offset="1" stop-color="#06080c"/>
+    </radialGradient>
+    <linearGradient id="cardBg" x1="0" y1="0" x2="0.7" y2="1">
+      <stop offset="0" stop-color="#1a2436"/>
+      <stop offset="1" stop-color="#131822"/>
+    </linearGradient>
+    <linearGradient id="titleGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#79c0ff"/>
+      <stop offset="1" stop-color="#d2a8ff"/>
+    </linearGradient>
+    <linearGradient id="greenStripe" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3fb950"/>
+      <stop offset="1" stop-color="#1f6f30"/>
+    </linearGradient>
+    <linearGradient id="purpleStripe" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d2a8ff"/>
+      <stop offset="1" stop-color="#7c4ec9"/>
+    </linearGradient>
+    <linearGradient id="cacheFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3fb950" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#3fb950" stop-opacity="0.02"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="640" fill="url(#bg)"/>
+
+  <!-- ====== Header ====== -->
+  <g transform="translate(48,40)">
+    <text font-family="-apple-system, 'Inter', sans-serif" font-size="26" font-weight="700" fill="#e6edf3">
+      TELOS <tspan fill="url(#titleGrad)">Token Savings</tspan>
+    </text>
+    <!-- mode badge -->
+    <g transform="translate(238,-15)">
+      <rect width="50" height="20" rx="10" fill="#0e2a2e" stroke="#3fb950" stroke-opacity="0.45"/>
+      <text x="25" y="14" text-anchor="middle" font-family="monospace" font-size="11" font-weight="600" fill="#3fb950">both</text>
+    </g>
+    <text y="22" font-family="-apple-system, 'Inter', sans-serif" font-size="13" fill="#7d8590">
+      48 calls · 4 sessions · controlled A/B/C/D benchmark · generated 2026-05-19 13:32 UTC
+    </text>
+  </g>
+
+  <!-- right side: ⟲ Reset button + meta -->
+  <g transform="translate(1152,46)" text-anchor="end" font-family="-apple-system, 'Inter', sans-serif">
+    <rect x="-92" y="-18" width="92" height="28" rx="8" fill="#161b22" stroke="#30363d"/>
+    <text x="-46" y="0" text-anchor="middle" font-size="12" font-weight="600" fill="#adb6c2">⟲ Reset · 清零</text>
+  </g>
+
+  <!-- ====== Hero cards ====== -->
+  <g transform="translate(48,98)">
+    <!-- Green hero: tokens saved -->
+    <g>
+      <rect width="540" height="120" rx="12" fill="url(#cardBg)" stroke="#30363d"/>
+      <rect width="4" height="120" rx="2" fill="url(#greenStripe)"/>
+      <text x="22" y="32" font-family="-apple-system, 'Inter', sans-serif" font-size="12" font-weight="600" fill="#7d8590" letter-spacing="0.04em">TOKENS SAVED (CACHE HITS)</text>
+      <text x="22" y="80" font-family="-apple-system, 'Inter', sans-serif" font-size="40" font-weight="700" fill="#e6edf3">527.12K</text>
+      <text x="22" y="106" font-family="-apple-system, 'Inter', sans-serif" font-size="12" fill="#7d8590">
+        cache hits are <tspan fill="#3fb950" font-weight="700">44.6%</tspan> of total prompt tokens · absolute <tspan font-family="monospace" fill="#adb6c2">527,123</tspan>
+      </text>
+    </g>
+
+    <!-- Purple hero: $ saved -->
+    <g transform="translate(564,0)">
+      <rect width="540" height="120" rx="12" fill="url(#cardBg)" stroke="#30363d"/>
+      <rect width="4" height="120" rx="2" fill="url(#purpleStripe)"/>
+      <text x="22" y="32" font-family="-apple-system, 'Inter', sans-serif" font-size="12" font-weight="600" fill="#7d8590" letter-spacing="0.04em">TOTAL COST SAVED (ESTIMATED)</text>
+      <text x="22" y="80" font-family="-apple-system, 'Inter', sans-serif" font-size="40" font-weight="700" fill="#e6edf3">$2.16</text>
+      <text x="22" y="106" font-family="-apple-system, 'Inter', sans-serif" font-size="12" fill="#7d8590">
+        TELOS prefix cache · <tspan fill="#d2a8ff" font-weight="700">36.6%</tspan> off counterfactual cost
+      </text>
+    </g>
+  </g>
+
+  <!-- ====== KPI strip ====== -->
+  <g transform="translate(48,238)" font-family="-apple-system, 'Inter', sans-serif">
+    <g>
+      <rect width="170" height="68" rx="10" fill="#0d1117" stroke="#21262d"/>
+      <text x="14" y="22" font-size="11" font-weight="600" fill="#7d8590" letter-spacing="0.05em">TOTAL CALLS</text>
+      <text x="14" y="52" font-size="22" font-weight="700" fill="#e6edf3">48</text>
+    </g>
+    <g transform="translate(186,0)">
+      <rect width="170" height="68" rx="10" fill="#0d1117" stroke="#21262d"/>
+      <text x="14" y="22" font-size="11" font-weight="600" fill="#7d8590" letter-spacing="0.05em">UNIQUE SESSIONS</text>
+      <text x="14" y="52" font-size="22" font-weight="700" fill="#e6edf3">4</text>
+    </g>
+    <g transform="translate(372,0)">
+      <rect width="170" height="68" rx="10" fill="#0d1117" stroke="#21262d"/>
+      <text x="14" y="22" font-size="11" font-weight="600" fill="#7d8590" letter-spacing="0.05em">RAW INPUT</text>
+      <text x="14" y="52" font-size="22" font-weight="700" fill="#e6edf3">591.09K</text>
+    </g>
+    <g transform="translate(558,0)">
+      <rect width="170" height="68" rx="10" fill="#0d1117" stroke="#21262d"/>
+      <text x="14" y="22" font-size="11" font-weight="600" fill="#7d8590" letter-spacing="0.05em">CACHE READ</text>
+      <text x="14" y="52" font-size="22" font-weight="700" fill="#3fb950">527.12K</text>
+    </g>
+    <g transform="translate(744,0)">
+      <rect width="170" height="68" rx="10" fill="#0d1117" stroke="#21262d"/>
+      <text x="14" y="22" font-size="11" font-weight="600" fill="#7d8590" letter-spacing="0.05em">CACHE WRITE</text>
+      <text x="14" y="52" font-size="22" font-weight="700" fill="#e6edf3">63.65K</text>
+    </g>
+    <g transform="translate(930,0)">
+      <rect width="170" height="68" rx="10" fill="#0d1117" stroke="#21262d"/>
+      <text x="14" y="22" font-size="11" font-weight="600" fill="#7d8590" letter-spacing="0.05em">OUTPUT</text>
+      <text x="14" y="52" font-size="22" font-weight="700" fill="#e6edf3">47</text>
+    </g>
+  </g>
+
+  <!-- ====== Token mix + Activity row ====== -->
+  <g transform="translate(48,330)" font-family="-apple-system, 'Inter', sans-serif">
+    <!-- Token mix -->
+    <text font-size="14" font-weight="700" fill="#e6edf3">Token mix</text>
+    <text x="68" y="0" font-size="11" fill="#7d8590">— normalized across engines</text>
+
+    <g transform="translate(0,14)">
+      <rect x="0" y="0" width="540" height="32" rx="4" fill="#0d1117"/>
+      <!-- raw_input 50.01% -->
+      <rect x="0" y="0" width="270.1" height="32" fill="#6e7681"/>
+      <!-- cache_read 44.60% -->
+      <rect x="270.1" y="0" width="240.8" height="32" fill="#3fb950"/>
+      <!-- cache_write 5.39% -->
+      <rect x="510.9" y="0" width="29.1" height="32" fill="#79c0ff"/>
+      <!-- output sliver -->
+      <rect x="540" y="0" width="0.1" height="32" fill="#d2a8ff"/>
+
+      <text x="135" y="20" text-anchor="middle" font-size="11" font-weight="700" fill="#0d1117">591.09K · 50.0%</text>
+      <text x="390" y="20" text-anchor="middle" font-size="11" font-weight="700" fill="#0d1117">527.12K · 44.6%</text>
+      <text x="525" y="20" text-anchor="middle" font-size="9.5" font-weight="700" fill="#0d1117">63.65K</text>
+    </g>
+
+    <g transform="translate(0,60)" font-size="11" fill="#7d8590">
+      <rect x="0"   y="-9" width="10" height="10" fill="#6e7681"/><text x="16" y="0">raw_input · billed @ 1.0×</text>
+      <rect x="166" y="-9" width="10" height="10" fill="#3fb950"/><text x="182" y="0">cache_read · billed @ 0.1×</text>
+      <rect x="346" y="-9" width="10" height="10" fill="#79c0ff"/><text x="362" y="0">cache_write · billed @ 1.25×</text>
+      <text x="0" y="18" fill="#5b6470" font-style="italic">「all prompt tokens base-priced — no discount, no premium」</text>
+    </g>
+
+    <!-- Activity / sparkline -->
+    <g transform="translate(564,0)">
+      <text font-size="14" font-weight="700" fill="#e6edf3">Activity over time</text>
+      <text x="142" y="0" font-size="11" fill="#7d8590">— cumulative cache_read &amp; saved $</text>
+
+      <g transform="translate(0,14)">
+        <rect x="0" y="0" width="540" height="98" rx="4" fill="#0d1117"/>
+
+        <!-- gridlines -->
+        <g stroke="#21262d" stroke-width="1">
+          <line x1="0" y1="24" x2="540" y2="24"/>
+          <line x1="0" y1="49" x2="540" y2="49"/>
+          <line x1="0" y1="74" x2="540" y2="74"/>
+        </g>
+
+        <!-- cache_read accumulating — monotonic non-decreasing (the brand promise) -->
+        <path d="M 0,92 L 45,90 L 90,86 L 135,80 L 180,70 L 225,60 L 270,50 L 315,40 L 360,32 L 405,24 L 450,18 L 495,14 L 540,12 L 540,98 L 0,98 Z" fill="url(#cacheFill)"/>
+        <path d="M 0,92 L 45,90 L 90,86 L 135,80 L 180,70 L 225,60 L 270,50 L 315,40 L 360,32 L 405,24 L 450,18 L 495,14 L 540,12"
+              fill="none" stroke="#3fb950" stroke-width="1.8"/>
+
+        <!-- saved $ line (lilac, lagging slightly) -->
+        <path d="M 0,94 L 45,93 L 90,90 L 135,85 L 180,78 L 225,70 L 270,60 L 315,48 L 360,38 L 405,28 L 450,22 L 495,17 L 540,14"
+              fill="none" stroke="#d2a8ff" stroke-width="1.8"/>
+
+        <!-- bar markers at hour boundaries to feel like the real chart -->
+        <g fill="#3fb950" opacity="0.85">
+          <circle cx="135" cy="80" r="2.2"/>
+          <circle cx="270" cy="50" r="2.2"/>
+          <circle cx="405" cy="24" r="2.2"/>
+          <circle cx="540" cy="12" r="2.2"/>
+        </g>
+
+        <!-- right edge labels -->
+        <text x="534" y="14" text-anchor="end" font-size="10.5" font-weight="700" fill="#3fb950">cache_read · 527.12K</text>
+        <text x="534" y="32" text-anchor="end" font-size="10.5" font-weight="700" fill="#d2a8ff">saved · $2.16</text>
+      </g>
+
+      <g transform="translate(0,128)" font-size="11" fill="#5b6470" font-style="italic">
+        <text>monotonic ↗ — never decreasing by construction · cache hit rate is a function of session length, not luck</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- ====== Breakdown table ====== -->
+  <g transform="translate(48,490)" font-family="-apple-system, 'Inter', sans-serif">
+    <text font-size="14" font-weight="700" fill="#e6edf3">Breakdown by mode</text>
+    <text x="158" y="0" font-size="11" fill="#7d8590">— same 12-call workload, 4 different mode flags · A/B/C/D</text>
+
+    <g transform="translate(0,14)">
+      <!-- header row -->
+      <rect x="0" y="0" width="1104" height="26" fill="#0d1117" stroke="#21262d"/>
+      <g font-size="10.5" fill="#7d8590" letter-spacing="0.04em">
+        <text x="16"   y="17" font-weight="600">MODE</text>
+        <text x="220"  y="17" text-anchor="middle" font-weight="600">CALLS</text>
+        <text x="340"  y="17" text-anchor="middle" font-weight="600">RAW_INPUT</text>
+        <text x="470"  y="17" text-anchor="middle" font-weight="600">CACHE_READ</text>
+        <text x="600"  y="17" text-anchor="middle" font-weight="600">CACHE_WRITE</text>
+        <text x="720"  y="17" text-anchor="middle" font-weight="600">HIT %</text>
+        <text x="820"  y="17" text-anchor="end" font-weight="600">SAVED $</text>
+        <text x="860"  y="17" font-weight="600">— absolute savings bar</text>
+      </g>
+
+      <!-- Row 1: Claude Code (TELOS on) -->
+      <g transform="translate(0,30)">
+        <rect x="0" y="0" width="1104" height="28" fill="#131a25"/>
+        <rect x="0" y="0" width="3" height="28" fill="#3fb950"/>
+        <g font-size="12" fill="#e6edf3">
+          <text x="16"  y="18" font-weight="700">Claude Code <tspan fill="#3fb950" font-size="10" font-weight="600">· TELOS</tspan></text>
+          <text x="220" y="18" text-anchor="middle">24</text>
+          <text x="340" y="18" text-anchor="middle">124</text>
+          <text x="470" y="18" text-anchor="middle" fill="#3fb950" font-weight="700">527.12K</text>
+          <text x="600" y="18" text-anchor="middle">63.65K</text>
+          <text x="720" y="18" text-anchor="middle" fill="#3fb950" font-weight="700">89.2%</text>
+          <text x="820" y="18" text-anchor="end" fill="#d2a8ff" font-weight="700">$2.16</text>
+          <rect x="860" y="9" width="220" height="10" rx="2" fill="#21262d"/>
+          <rect x="860" y="9" width="220" height="10" rx="2" fill="#d2a8ff" opacity="0.78"/>
+        </g>
+      </g>
+
+      <!-- Row 2: passthrough -->
+      <g transform="translate(0,62)">
+        <g font-size="12" fill="#adb6c2">
+          <text x="16"  y="18">passthrough <tspan fill="#5b6470" font-size="10">· control</tspan></text>
+          <text x="220" y="18" text-anchor="middle">12</text>
+          <text x="340" y="18" text-anchor="middle">321.99K</text>
+          <text x="470" y="18" text-anchor="middle" fill="#5b6470">0</text>
+          <text x="600" y="18" text-anchor="middle" fill="#5b6470">0</text>
+          <text x="720" y="18" text-anchor="middle" fill="#5b6470">0.0%</text>
+          <text x="820" y="18" text-anchor="end" fill="#5b6470">$0.0000</text>
+          <rect x="860" y="9" width="220" height="10" rx="2" fill="#21262d"/>
+        </g>
+      </g>
+
+      <!-- Row 3: rtk-only -->
+      <g transform="translate(0,90)">
+        <g font-size="12" fill="#adb6c2">
+          <text x="16"  y="18">rtk-only <tspan fill="#5b6470" font-size="10">· ablation</tspan></text>
+          <text x="220" y="18" text-anchor="middle">12</text>
+          <text x="340" y="18" text-anchor="middle">268.97K</text>
+          <text x="470" y="18" text-anchor="middle" fill="#5b6470">0</text>
+          <text x="600" y="18" text-anchor="middle" fill="#5b6470">0</text>
+          <text x="720" y="18" text-anchor="middle" fill="#5b6470">0.0%</text>
+          <text x="820" y="18" text-anchor="end" fill="#5b6470">$0.0000</text>
+          <rect x="860" y="9" width="220" height="10" rx="2" fill="#21262d"/>
+        </g>
+      </g>
+    </g>
+  </g>
+
+  <!-- Footer caption -->
+  <text x="600" y="628" text-anchor="middle" font-family="-apple-system, 'Inter', sans-serif" font-size="10.5" fill="#5b6470" font-style="italic">
+    saved $ = cache_read × (input_price − cache_read_price) · all numbers from real run, ~/.telos/usage_log.jsonl → showcase/dashboard.html · no JS · opens offline
+  </text>
+</svg>

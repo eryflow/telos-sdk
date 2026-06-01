@@ -1,0 +1,53 @@
+---
+title: "Support Matrix"
+description: "Harnesses, frontier models, and self-hosted inference frameworks that TELOS supports today."
+icon: "table"
+---
+
+TELOS is adapter-driven: the same IR runs across every target below. Need another harness or model
+backend? Keep the IR and add an engine/harness adapter without rewriting your agent logic.
+
+## Harness support
+
+| Harness | Typical usage | `telos init` auto-connect | Status |
+|---|---|:---:|:---:|
+| Claude Code | Anthropic-native coding agent workflow | ✅ | 🟢 First-class |
+| OpenClaw | Open-source agent runtime with TELOS parser integration | ✅ | 🟢 First-class |
+| Hermes | Multi-agent orchestration with independent sub-IR handling | ✅ | 🟢 First-class |
+| Codex | OpenAI-style coding workflow via local gateway injection | ✅ | 🟢 Supported |
+
+See [Harness integration](/en/guides/harnesses) for how each connects and is detected.
+
+## Frontier model support
+
+| Model family | Provider | Through TELOS engine adapter | Notes |
+|---|---|:---:|---|
+| Claude (4.x / 4.6+) | Anthropic | ✅ | Explicit breakpoints and prewarm path |
+| GPT (4+ / 5.x) | OpenAI | ✅ | Uses `prompt_cache_key` routing strategy |
+| DeepSeek (V3+) | DeepSeek | ✅ | Deterministic byte-stable prefix behavior |
+
+## Inference framework support
+
+| Framework | Deployment style | Through TELOS | Cache-aware capabilities |
+|---|---|:---:|---|
+| vLLM | Self-hosted OpenAI-compatible serving | ✅ | Explicit anchors, prewarm, cache probe/evict, partial fork-and-replace |
+| SGLang | Self-hosted high-throughput serving | ✅ | Explicit anchors, prewarm, cache probe/evict, full fork-and-replace |
+
+## Engine capability matrix
+
+| Field | Anthropic | OpenAI | DeepSeek | vLLM | SGLang |
+|---|:---:|:---:|:---:|:---:|:---:|
+| `explicit_breakpoints` | ✓ | ✗ | ✗ | ✓ | ✓ |
+| `max_breakpoints` | **4** | 0 | 0 | 2 | 2 |
+| `ttl_control` | presets (5m/1h) | presets (in-memory/24h) | none | none | none |
+| `prewarmable` | ✓ (`max_tokens:0`) | ✗ | ✗ | ✓ (`max_tokens:1`) | ✓ (`prewarm_only`) |
+| `routing_key` | ✗ | ✓ (`prompt_cache_key`) | ✗ | ✓ (`cache_salt`) | ✓ (`affinity_key`) |
+| `cache_probe` | ✗ | ✗ | ✗ | ✓ | ✓ |
+| `span_eviction` | ✗ | ✗ | ✗ | ✓ | ✓ |
+| `fork_and_replace` | ✗ | ✗ | ✗ | ✗ | ✓ |
+| `tier_hint` | ✗ | ✗ | ✗ | ✗ | ✓ |
+| Bidirectional class | No | No | No | Yes | Yes |
+
+<Card title="Architecture reference" icon="book" href="/en/reference/architecture-reference">
+  Each engine's emit strategy and usage-parsing rules.
+</Card>

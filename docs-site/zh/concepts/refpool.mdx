@@ -1,0 +1,57 @@
+---
+title: "ref-pool"
+description: "大内容的指针表——slug 在注册时冻结，折叠时绝不触碰前缀字节。"
+icon: "table-cells"
+---
+
+ref-pool 是所有大块内容的"指针表"。超大的 system 项、`<file>` 块与大文档被移入池中，并以一个稳定 slug
+引用，从而日后折叠它们时绝不扰动已缓存的前缀。
+
+## slug 在注册时冻结
+
+`register` 用正则 `^[A-Za-z0-9_\-./]+$` 校验 slug，要求块为 `band=FOLD`，且 `ref_slug` 等于 slug。
+**重复注册会抛错**——slug 一旦冻结即不可变。
+
+- **`register_or_skip`** —— 幂等注册。跨轮共享 `RefPool` 时使用：harness 每轮都产出含完整 payload 的
+  `ref_pool`，此方法防止第二轮覆盖第一轮已折叠成占位符的条目。
+
+## 折叠而不破坏前缀
+
+```python
+fold(slug, summary=...)   # 把条目换成一个短占位符
+```
+
+slug **不被触碰**，文本中每个 `[ref:slug]` 引用点的字节保持不变 → 后续断点仍能命中。这就是"引用自然折叠"
+的实现方式：你替换 slug 所指向的*内容*，而非指针本身。
+
+<Note>
+  折叠只换 payload，不换 slug。因为引用字节折叠前后一致，到该点为止的 prefix hash 被保留——cache 在折叠后
+  幸存。
+</Note>
+
+## 渲染与 lint
+
+- **`render_blocks`** —— 按 slug 字典序渲染条目，保证跨 emit 的字节稳定。
+- **`lint_text` / `lint_blocks`** —— emit 前扫描所有 `[ref:slug]` 引用；发现未注册 slug 立即 fail-fast。
+
+bridge 的 `_sync_refpool_into_system` 把 ref-pool 渲染进 system 段，顺序为 `pin* + ref-pool fold* + drop*`，
+保持 §5 不变量完好。
+
+## 内容如何进入池
+
+| 来源 | 行为 |
+|---|---|
+| `system` 文本 > 2048 字符 | 整个超大 system 项入池，slug `system-doc-{i}`，原位留一个 PIN 引用桩 |
+| Hermes `<file path=…>` 块 | 点号 slug，`band=FOLD` |
+| Telos 大文档 | 短横线 slug |
+
+阈值为 `_REFPOOL_THRESHOLD = 2048`。
+
+<CardGroup cols={2}>
+  <Card title="三色带" icon="layer-group" href="/zh/concepts/bands">
+    为什么 ref-pool 条目是 FOLD，PIN 桩放在哪里。
+  </Card>
+  <Card title="架构参考" icon="book" href="/zh/reference/architecture-reference">
+    完整的 ref-pool 章节，含不变量表。
+  </Card>
+</CardGroup>

@@ -1,0 +1,118 @@
+---
+title: "节省看板"
+description: "面向用户的看板——TELOS 省了多少 token、多少美元，钉死在绝对成本上。"
+icon: "chart-line"
+---
+
+节省看板回答老板的问题：**采用 TELOS 后，省了多少 token、多少钱？** 它读取 jsonl `usage_log`——每次调用
+一行——并实时聚合。
+
+```bash
+telos dashboard --usage-log ~/.telos/usage.jsonl --out savings.html
+# 或打开代理内嵌的 /__telos/dashboard
+```
+
+<Frame>
+  <img src="/images/05-dashboard.png" alt="TELOS 节省看板" />
+</Frame>
+
+## 四个 token 桶
+
+Anthropic 的 `usage` 字段被归一化为四个数：
+
+| 桶 | 来源 | 含义 |
+|---|---|---|
+| `raw_input` | `usage.input_tokens` | **未命中且未写入缓存**的 prompt token |
+| `cache_read` | `usage.cache_read_input_tokens` | **命中缓存**的 prompt token——节省的关键 |
+| `cache_write` | `usage.cache_creation_input_tokens` | 本次调用新写入缓存的 prompt token |
+| `output` | `usage.output_tokens` | 模型生成的 token |
+
+<Warning>
+  Anthropic 的 `input_tokens` **只是** `raw_input`——不含 `cache_read` 与 `cache_write`。所以
+  **总 prompt token = raw_input + cache_read + cache_write**，看板上每个 `hit%` 的分母都用这个和。用更小
+  的分母会高估命中率。
+</Warning>
+
+## 价目表（USD / 1M token，2026 公开价）
+
+| 模型前缀 | input | cache_read | cache_write 5m | cache_write 1h | output |
+|---|---:|---:|---:|---:|---:|
+| `claude-opus-4-7` / `4-6` | 5.00 | 0.50 | 6.25 | 10.00 | 25.00 |
+| `claude-opus-4-5` / `4` | 15.00 | 1.50 | 18.75 | 30.00 | 75.00 |
+| `claude-sonnet-4-6` / `4-5` / `4` | 3.00 | 0.30 | 3.75 | 6.00 | 15.00 |
+| `claude-haiku-4-5` / `4` | 1.00 | 0.10 | 1.25 | 2.00 | 5.00 |
+| `gpt-5` / `gpt-5.1` | 5.00 | 1.25 | 0 | 0 | 15.00 |
+| `deepseek-chat` / `v3` | 0.27 | 0.07 | 0 | 0 | 1.10 |
+| `_default`（未识别）| 3.00 | 0.30 | 3.75 | 6.00 | 15.00 |
+
+Anthropic 的缓存计费规则，已编码：
+
+```
+cache_read 价 = 0.10 × input 价        缓存命中 → 9 折后再打 1 折
+cache_write 5m = 1.25 × input 价        短 TTL 写 → 多付 25%
+cache_write 1h = 2.00 × input 价        长 TTL 写 → 多付 100%
+```
+
+## 节省如何计算
+
+**单次调用实际成本：**
+
+```
+cost = raw_input × input + cache_read × cache_read
+     + cache_write_5m × write_5m + cache_write_1h × write_1h + output × output
+```
+
+**反事实**（"若 TELOS 关闭"——移除所有 `cache_control`，每个 prompt token 按基础 input 价）：
+
+```
+counterfactual = (raw_input + cache_read + cache_write) × input + output × output
+```
+
+**节省额：**
+
+```
+saved = counterfactual − actual
+      = cache_read     × (input − cache_read)        ← 缓存命中赚回
+      + cache_write_5m × (input − write_5m)          ← 5m 写溢价，为负
+      + cache_write_1h × (input − write_1h)          ← 1h 写溢价，更负
+```
+
+<Note>
+  对 Anthropic，`cache_write` 项是**负**贡献——一次写比基础价贵 25–100%。只有当 `cache_read`
+  量足够大（缓存被多次复用）时总额才转正。看板的 `saved $` 已把这个溢价计为负贡献。
+</Note>
+
+## 看板展示什么
+
+- **Hero** —— 省下的 token（`total.cache_read`）与省下的成本（`total.saved_usd`），副标题为命中占总
+  prompt token 的百分比、以及相对反事实成本省下的百分比。
+- **KPI 条** —— 总调用数、唯一会话数、累积 raw_input / cache_read / cache_write（5m·1h 拆分）/ output。
+- **Token 构成** —— 四桶堆叠条（🟠 raw_input · 🟢 cache_read · 🟡 cache_write · 🔵 output）。
+- **活动时间线** —— 按小时分桶；绿条 = cache_read 量，紫线 = saved_usd。
+- **分解** —— 按 harness / model / session，按 cache_read 降序。
+
+实时节省看板刻意聚焦这些总量；来自 replay/showcase 工作流的 `mode`、`compare_group`、`replay` 元数据被排除在
+本页之外（用 [Replay 与对比](/zh/observability/replay) 与 `/__telos/developer.json`）。
+
+## 常见问题
+
+<AccordionGroup>
+  <Accordion title="cache_read 越多就省越多吗？">
+    是的。命中缓存的 token 只付 10% 价；在 Opus 4.7 上每多 1M token 的 cache_read 省 \$4.50。
+  </Accordion>
+  <Accordion title="cache_write 越多越好吗？">
+    不一定。每 1M token 写入 5m 缓存花 \$6.25（比 input 的 \$5 多 25%），写入 1h 缓存花 \$10（多 100%）。只有
+    当该缓存随后被多次命中，写溢价才能被摊销。`saved $` 已把溢价计为负贡献。
+  </Accordion>
+  <Accordion title="为什么 cache_write 计入 hit% 分母？">
+    因为 Anthropic 的 `input_tokens` 只指未命中*且*未写缓存的部分，真正的总 prompt 量 = raw_input +
+    cache_read + cache_write。更小的分母会高估命中率。
+  </Accordion>
+  <Accordion title="未识别的模型如何处理？">
+    落到 `_default`（按 Sonnet 档估算）。此时 `saved $` 是近似估计，而非精确账单。
+  </Accordion>
+</AccordionGroup>
+
+<Card title="开发者页" icon="bug" href="/zh/observability/developer-page">
+  实时内存视图：IR 结构、分带分布、BP 槽位与工具统计。
+</Card>

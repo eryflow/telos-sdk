@@ -1,0 +1,113 @@
+---
+title: "Installation"
+description: "Install TELOS from PyPI, the one-line script, or source — plus requirements and one-command integration."
+icon: "download"
+---
+
+## Requirements
+
+- **Python ≥ 3.10** (CI runs the 3.10–3.13 matrix).
+- Dependencies: `anthropic ≥ 0.49`, `openai ≥ 1.72`, `aiohttp ≥ 3.10` (installed automatically).
+
+## Install
+
+<Tabs>
+  <Tab title="One-line script">
+    ```bash
+    # Linux / macOS / WSL2 / Android (Termux)
+    curl -fsSL https://raw.githubusercontent.com/learningCatHD/telos-sdk/main/scripts/install.sh | bash
+    ```
+  </Tab>
+  <Tab title="pip">
+    ```bash
+    pip install -U telos-sdk
+    ```
+  </Tab>
+  <Tab title="From source">
+    ```bash
+    git clone https://github.com/learningCatHD/telos-sdk.git
+    cd telos-sdk
+    python3.11 -m venv .venv
+    source .venv/bin/activate
+    pip install -e .
+    ```
+    `pyproject.toml` maps the project root directory to the `telos` package.
+  </Tab>
+</Tabs>
+
+Verify the install:
+
+```bash
+python -c "import telos; print(telos.__file__)"
+# .../telos-sdk/__init__.py
+
+telos --help
+# usage: telos [<subcommand>] [...]
+
+telos version    # or: telos -V
+```
+
+## One-command integration (recommended)
+
+```bash
+telos init
+```
+
+`telos init` with no arguments auto-detects which harness CLIs are installed locally
+(claude-code / codex / openclaw / hermes), injects config pointing at the local gateway into each,
+starts the gateway in the background, and prints the gateway and dashboard addresses.
+
+<Note>
+  This is the **Path B (proxy)** setup. For in-code integration instead, see
+  [Path A · SDK transport](/en/guides/sdk-transport).
+</Note>
+
+### Integrate a single harness
+
+```bash
+telos init --harness claude-code     # operate on Claude Code only
+telos init --harness claude-code --status   # view only, don't modify files
+```
+
+For Claude Code this writes into the `env` field of `~/.claude/settings.json`:
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:7171",
+    "__telos_installed": true
+  }
+}
+```
+
+Afterward any process that starts Claude Code automatically uses the local gateway — **no change to
+the npm package**, **no change to PATH**, and **`npm update` won't lose it**.
+
+### Undo / check status
+
+```bash
+telos uninstall --harness claude-code     # restore the pre-install state
+telos status                              # gateway + per-harness install + live traffic, in one place
+telos status --json                       # machine-readable
+```
+
+## What got installed where
+
+| Path | Purpose |
+|---|---|
+| `~/.telos/config.json` | default host / port / mode |
+| `~/.telos/gateway.json` | background gateway state (PID, address) |
+| `~/.telos/gateway.log` | gateway log |
+| `~/.telos/usage.jsonl` | one JSON line per call, fed into the dashboard |
+| `~/.telos/corpus/<session>.jsonl` | recorded raw requests for replay |
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/en/start/quickstart">
+    The three-command tour, end to end.
+  </Card>
+  <Card title="Proxy gateway" icon="network-wired" href="/en/guides/proxy-gateway">
+    Start, stop, and configure the gateway manually.
+  </Card>
+</CardGroup>

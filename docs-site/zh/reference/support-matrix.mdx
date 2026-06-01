@@ -1,0 +1,53 @@
+---
+title: "支持矩阵"
+description: "TELOS 当前支持的 harness、前沿模型与自托管推理框架。"
+icon: "table"
+---
+
+TELOS 采用适配器驱动：同一份 IR 通达下列每个目标。需要别的 harness 或模型后端？保持 IR，加一个
+engine/harness 适配器即可，无需重写 agent 逻辑。
+
+## Harness 支持
+
+| Harness | 典型用途 | `telos init` 自动接入 | 状态 |
+|---|---|:---:|:---:|
+| Claude Code | Anthropic 原生编码 agent 工作流 | ✅ | 🟢 一等公民 |
+| OpenClaw | 集成 TELOS 解析器的开源 agent 运行时 | ✅ | 🟢 一等公民 |
+| Hermes | 独立子 IR 处理的多 agent 编排 | ✅ | 🟢 一等公民 |
+| Codex | 经本地网关注入的 OpenAI 风格编码工作流 | ✅ | 🟢 支持 |
+
+各自如何接入与探测见 [Harness 集成](/zh/guides/harnesses)。
+
+## 前沿模型支持
+
+| 模型族 | 提供方 | 经 TELOS 引擎适配器 | 备注 |
+|---|---|:---:|---|
+| Claude（4.x / 4.6+）| Anthropic | ✅ | 显式断点与预热路径 |
+| GPT（4+ / 5.x）| OpenAI | ✅ | 使用 `prompt_cache_key` 路由策略 |
+| DeepSeek（V3+）| DeepSeek | ✅ | 确定性字节稳定前缀行为 |
+
+## 推理框架支持
+
+| 框架 | 部署方式 | 经 TELOS | 缓存感知能力 |
+|---|---|:---:|---|
+| vLLM | 自托管 OpenAI 兼容服务 | ✅ | 显式锚点、预热、缓存探测/驱逐、部分 fork-and-replace |
+| SGLang | 自托管高吞吐服务 | ✅ | 显式锚点、预热、缓存探测/驱逐、完整 fork-and-replace |
+
+## 引擎能力矩阵
+
+| 字段 | Anthropic | OpenAI | DeepSeek | vLLM | SGLang |
+|---|:---:|:---:|:---:|:---:|:---:|
+| `explicit_breakpoints` | ✓ | ✗ | ✗ | ✓ | ✓ |
+| `max_breakpoints` | **4** | 0 | 0 | 2 | 2 |
+| `ttl_control` | 预设 (5m/1h) | 预设 (in-memory/24h) | 无 | 无 | 无 |
+| `prewarmable` | ✓ (`max_tokens:0`) | ✗ | ✗ | ✓ (`max_tokens:1`) | ✓ (`prewarm_only`) |
+| `routing_key` | ✗ | ✓ (`prompt_cache_key`) | ✗ | ✓ (`cache_salt`) | ✓ (`affinity_key`) |
+| `cache_probe` | ✗ | ✗ | ✗ | ✓ | ✓ |
+| `span_eviction` | ✗ | ✗ | ✗ | ✓ | ✓ |
+| `fork_and_replace` | ✗ | ✗ | ✗ | ✗ | ✓ |
+| `tier_hint` | ✗ | ✗ | ✗ | ✗ | ✓ |
+| 双向类 | 否 | 否 | 否 | 是 | 是 |
+
+<Card title="架构参考" icon="book" href="/zh/reference/architecture-reference">
+  每个引擎的 emit 策略与 usage 解析规则。
+</Card>

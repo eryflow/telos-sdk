@@ -1,0 +1,95 @@
+---
+title: "Harness Integration"
+description: "Claude Code, Codex, OpenClaw, and Hermes — how each connects, and how TELOS detects which harness a request belongs to."
+icon: "plug"
+---
+
+A harness is the upstream agent runtime. TELOS ships first-class support for four, and is adapter-driven
+so you can add more without rewriting your agent logic.
+
+## Supported harnesses
+
+| Harness | Typical usage | `telos init` auto-connect | Status |
+|---|---|:---:|:---:|
+| Claude Code | Anthropic-native coding agent workflow | ✅ | 🟢 First-class |
+| OpenClaw | Open-source agent runtime with TELOS parser integration | ✅ | 🟢 First-class |
+| Hermes | Multi-agent orchestration with independent sub-IR handling | ✅ | 🟢 First-class |
+| Codex | OpenAI-style coding workflow via local gateway injection | ✅ | 🟢 Supported |
+
+## How each connects
+
+<Tabs>
+  <Tab title="Claude Code">
+    `telos init --harness claude-code` writes `ANTHROPIC_BASE_URL` into the `env` field of
+    `~/.claude/settings.json` (atomic, backed up to `.telos.bak`, marked with `__telos_installed`).
+    Survives `npm update`, never touches PATH or the npm package.
+  </Tab>
+  <Tab title="Codex">
+    `telos init --harness codex` adds a `model_provider = "telos"` custom provider to
+    `~/.codex/config.toml`, pointing Codex at `http://127.0.0.1:7171/upstreams/openai/v1`. The OpenAI
+    Responses API path is passthrough; ChatCompletions-compatible traffic is TELOS-processed.
+  </Tab>
+  <Tab title="OpenClaw / Hermes">
+    `telos init` patches each harness's own provider config to point at the local gateway.
+  </Tab>
+  <Tab title="Generic">
+    `telos init --harness generic` prints manual export instructions for any client that respects
+    `ANTHROPIC_BASE_URL` or `OPENAI_BASE_URL`.
+  </Tab>
+</Tabs>
+
+## How a harness is parsed
+
+Each harness plugin is a stateless `parse(raw) → TelosIR`. They differ in wire shape and identity:
+
+| | OpenClaw | Hermes | Telos |
+|---|---|---|---|
+| Wire shape | Anthropic `/v1/messages` | Anthropic `/v1/messages` | OpenAI ChatCompletions |
+| Tool classification | `_classify_anthropic_tool` (type prefix + server field + metadata) | reuses `_classify_anthropic_tool` | `_classify_openai_tool` (metadata only) |
+| `<file>` into ref-pool | no (whole oversized system item → slug `system-doc-{i}`) | yes (`<file path=…>`, dotted slug) | yes (dash slug) |
+| `thinking` block | not handled | FOLD `kind=thinking` | n/a |
+| `tool_result` source | embedded in the user message | embedded in the user message | standalone `role=tool` → wrapped into a user message |
+| system extraction | the `system` field | the `system` field | leading consecutive `role=system` in `messages[]` |
+| `source_tag` prefix | `openclaw/*` | `hermes/*` | `telos/*` |
+
+Tool classification writes `source` (builtin / mcp / user) into `TelosBlock.extra`, feeding the
+bridge's `_tool_sort_key` to protect PIN prefix stability across multi-MCP startup races.
+
+## Harness detection (`_detect_harness`)
+
+For Anthropic-shaped traffic, TELOS picks between `hermes` and `openclaw`. Detection runs in order and
+returns on the first hit:
+
+<Steps>
+  <Step title="HTTP header fingerprint">
+    `User-Agent` containing `claude-cli`, or `x-app: cli` → `hermes`. Only the proxy path sees request
+    headers. This reliably catches Claude Code's tool-less Haiku auxiliary requests (title generation /
+    topic detection), which steps 1–3 below all miss.
+  </Step>
+  <Step title="Envelope markers">
+    Paired open/close regexes (`system-reminder` / `command-message` / `command-name`) in the system
+    text **and** in every user text block → `hermes`. Paired matching avoids misclassifying a user who
+    is merely discussing tags in prose.
+  </Step>
+  <Step title="thinking block">
+    Any assistant message containing a `thinking` content block → `hermes`.
+  </Step>
+  <Step title="Tool fingerprint">
+    The intersection of tool names with `{Bash, Edit, Read, Write, Grep, Glob, TodoWrite, Task,
+    WebFetch, WebSearch, NotebookEdit}` ≥ 3 → `hermes`. Catches the first-turn request before the
+    reminder is injected.
+  </Step>
+  <Step title="Fallback">
+    Otherwise → `openclaw`.
+  </Step>
+</Steps>
+
+<Note>
+  Detection is **sticky**. The proxy remembers the confident signal per client
+  (`ProxyApp._client_harness`); the SDK transport writes it into `BridgeSessionState.sticky_harness`.
+  This avoids re-probing per call, which would flip the harness and destabilize the prefix.
+</Note>
+
+<Card title="Support Matrix" icon="table" href="/en/reference/support-matrix">
+  The full harness, model, and inference-framework support tables.
+</Card>
