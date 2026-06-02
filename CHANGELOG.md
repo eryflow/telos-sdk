@@ -9,6 +9,10 @@ The format follows Keep a Changelog; dates are absolute.
 
 ## [Unreleased]
 
+---
+
+## [0.1.8] — 2026-06-02
+
 ### Added
 
 - **`telos ccswitch`** — coexistence with [cc-switch](https://github.com/farion1231/cc-switch),
