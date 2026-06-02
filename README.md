@@ -6,6 +6,8 @@
 
 **No rewrite. No compression. 90% token billing saving.**
 
+<sub>💰 **−50–90% token bill** &nbsp;·&nbsp; 🎯 **Same agent behavior** &nbsp;·&nbsp; ⚡ **Faster, not slower** &nbsp;·&nbsp; 🔒 **Captures no content** &nbsp;—&nbsp; [details ↓](#guarantees)</sub>
+
 <sub>One canonical IR — tools, system, turns, and memory — runs unchanged across Anthropic · OpenAI · DeepSeek · vLLM · SGLang<br/>Real 6-turn session −92.3% · Cost reported in absolute $/query-resolved — ratios can be gamed; dollars can't</sub>
 
 <sub>LEAP Lab @ Tsinghua University — a research group focused on machine learning, multimodal learning, and embodied intelligence · <a href="https://www.leaplab.ai/">leaplab.ai</a></sub>
@@ -18,9 +20,9 @@
 [![Protocol](https://img.shields.io/badge/protocol-TELOS%20IR-7FD8E0?style=flat-square)](docs/2026-05-06-telos-protocol.md)
 [![Version](https://img.shields.io/badge/version-0.1.8-4FB3BF?style=flat-square)](CHANGELOG.md)
 
-[**Quickstart**](#quickstart) · [**Support Matrix**](#support-matrix) · [**Why**](#why-telos) · [**Benchmark**](#benchmark) · [**Protocol**](#protocol) · [**Roadmap**](#roadmap) · [**Citation**](#citation)
+[**Quickstart**](#quickstart) · [**Guarantees**](#guarantees) · [**Support Matrix**](#support-matrix) · [**Why**](#why-telos) · [**Benchmark**](#benchmark) · [**Protocol**](#protocol) · [**Roadmap**](#roadmap) · [**Citation**](#citation)
 
-<sub>📖 &nbsp;**English** · [Simplified Chinese](README.zh-CN.md)</sub>
+<sub>📖 &nbsp;**English** · [中文](README.zh-CN.md)</sub>
 
 </div>
 
@@ -95,6 +97,21 @@ Opens an offline HTML dashboard in your browser showing savings per call in abso
 
 
 **TELOS is open source. Run it on your own workflow — see whether that 92% is real, or just another "X× tokens" claim.**
+
+---
+
+<a id="guarantees"></a>
+
+## ⬢ &nbsp;Four things you actually care about
+
+Cost is only the headline. The reason TELOS is safe to leave on production traffic is the other three rows — it changes *what you are billed for*, not *what your agent does*.
+
+| What you care about | The guarantee | Why it holds |
+|---|---|---|
+| 💰 **Token bill** | **−50% to −90% on billed input tokens.** 6-turn real session **−92.3%**; SWE-bench Verified **−52.8% new_input / −40.5% end-to-end cost**. | The shared prefix is served from cache (`cache_read`) instead of re-billed at full price every turn. |
+| 🎯 **Agent behavior** | **Unchanged.** Same model, same prompt semantics, same outputs. TELOS only restructures the proxy→upstream segment; **the agent's local context is untouched**. | SWE-bench Verified A/B: McNemar **p = 0.66**, no resolved-rate regression. DROP only strips ephemeral noise (timestamps, CWD, PIDs) that never affects the answer. |
+| ⚡ **Inference speed** | **Not slower — faster.** A cache hit skips re-prefilling the bytes already submitted, and prefill dominates a long-context turn, so **time-to-first-token falls as the session grows**. | Monotonic append → the prefix never changes → the engine matches the longest common prefix on every request. Longer session, more reuse, lower latency. |
+| 🔒 **Your data** | **Captures no content.** Prompts and responses are never stored or sent anywhere. | The gateway runs on `127.0.0.1`; the usage log records token **counts** and band structure only — never prompt/response text; the dashboard is a single offline HTML file. No cloud, no telemetry, no secret copied into TELOS config. |
 
 ---
 

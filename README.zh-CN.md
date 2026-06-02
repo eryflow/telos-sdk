@@ -6,6 +6,8 @@
 
 **无需重写。无需压缩。可节省 90% token 账单。**
 
+<sub>💰 **token 账单 −50–90%** &nbsp;·&nbsp; 🎯 **agent 行为不变** &nbsp;·&nbsp; ⚡ **更快，不更慢** &nbsp;·&nbsp; 🔒 **不捕获任何内容** &nbsp;—&nbsp; [详情 ↓](#guarantees)</sub>
+
 <sub>一份唯一 IR——tools、system、turns 与 memory——可在 Anthropic · OpenAI · DeepSeek · vLLM · SGLang 上不加修改地运行<br/>真实 6 轮会话节省 -92.3% · 成本按绝对 $/已解决请求 记录——比例可以造，美元不行</sub>
 
 <sub>清华大学 LEAP Lab —— 聚焦机器学习、多模态学习与具身智能的研究团队 · <a href="https://www.leaplab.ai/">leaplab.ai</a></sub>
@@ -17,7 +19,7 @@
 [![Status](https://img.shields.io/badge/status-Beta-d8851f?style=flat-square)](CHANGELOG.md)
 [![Protocol](https://img.shields.io/badge/protocol-TELOS%20IR-7FD8E0?style=flat-square)](docs/2026-05-06-telos-protocol.md)
 
-[**快速开始**](#quickstart) · [**支持矩阵**](#support-matrix) · [**为什么**](#why-telos) · [**Benchmark**](#benchmark) · [**协议**](#protocol) · [**路线图**](#roadmap) · [**引用**](#citation)
+[**快速开始**](#quickstart) · [**四个承诺**](#guarantees) · [**支持矩阵**](#support-matrix) · [**为什么**](#why-telos) · [**Benchmark**](#benchmark) · [**协议**](#protocol) · [**路线图**](#roadmap) · [**引用**](#citation)
 
 <sub>📖 &nbsp;**English** · [简体中文](README.zh-CN.md)</sub>
 
@@ -93,6 +95,21 @@ telos dashboard
 <p align="center"><sub><strong>每一笔节省都固定到绝对美元</strong> · 无需云服务 · 支持离线打开 · <code>~/.telos/usage.jsonl</code> 直接驱动单文件 HTML 页面</sub></p>
 
 **TELOS 是开源的。把它接到你的真实工作流里，看看那 92% 到底是真收益，还是又一个“X 倍 token”说法。**
+
+---
+
+<a id="guarantees"></a>
+
+## ⬢ &nbsp;你真正关心的四件事
+
+省钱只是标题。TELOS 敢挂在生产流量上，靠的是下面另外三行——它改变的是**你被计费的内容**，而不是**你的 agent 做什么**。
+
+| 你关心的 | 承诺 | 为什么成立 |
+|---|---|---|
+| 💰 **Token 账单** | **计费输入 token 降低 50%–90%。** 6 轮真实会话 **−92.3%**；SWE-bench Verified **new_input −52.8% / 端到端成本 −40.5%**。 | 共享前缀由缓存（`cache_read`）命中，而不是每轮按全价重新计费。 |
+| 🎯 **Agent 行为** | **完全不变。** 同一个模型、同样的 prompt 语义、同样的输出。TELOS 只重排 proxy→上游这一段，**agent 本地的上下文原封不动**。 | SWE-bench Verified A/B：McNemar **p = 0.66**，解决率无回归。DROP 只剥离时间戳、CWD、PID 等永远不影响答案的易变噪声。 |
+| ⚡ **推理速度** | **不会更慢，只会更快。** 缓存命中可跳过对已提交字节的重新 prefill，而 prefill 是长上下文一轮的主要开销，因此**会话越长，首 token 时延越低**。 | 单调追加 → 前缀永不改变 → 引擎每次请求都能匹配最长公共前缀。会话越长，复用越多，延迟越低。 |
+| 🔒 **你的数据** | **不捕获任何具体内容。** prompt 与回复从不被存储或外发。 | 网关跑在 `127.0.0.1`；用量日志只记录 token **计数**与色带结构，从不记录 prompt/回复正文；dashboard 是单个离线 HTML 文件。无云端、无遥测、不把任何密钥复制进 TELOS 配置。 |
 
 ---
 
