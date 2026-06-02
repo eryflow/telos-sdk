@@ -28,9 +28,9 @@
 
 **News** 🔥
 
-* **[2026.05.31]** [v0.1.7](CHANGELOG.md) — `telos status` / `telos uninstall` / `telos version` CLI commands; Codex HTML passthrough guard; cache TTL ordering fix; CI matrix expanded to Python 3.10–3.13.
-* **[2026.05.29]** [v0.1.6](CHANGELOG.md) — `telos init` now auto-restarts the gateway when a new harness upstream is registered, eliminating the manual `telos gateway restart` step.
-* **[2026.05.27]** [v0.1.4](CHANGELOG.md) — Codex.app (ChatGPT login mode) is now a first-class harness; installer auto-detects `auth_mode` and routes through the correct upstream.
+* **[2026.05.31]** Coexists with [cc-switch](https://github.com/farion1231/cc-switch) — TELOS chains its gateway in front of whatever upstream relay cc-switch selects, no secret ever copied into TELOS config.
+* **[2026.05.29]** `telos init` now auto-restarts the gateway when a new harness upstream is registered, dropping the manual restart step.
+* **[2026.05.27]** Codex.app (ChatGPT login mode) is now a first-class harness; the installer auto-detects `auth_mode` and routes through the correct upstream.
 
 * * *
 
@@ -49,7 +49,7 @@ Take the exact same **6-turn** real conversation, drop it into openclaw, flip tw
 | passthrough (today's default) | 24,151 | 0 | **$0.3623** |
 | with TELOS | 0 | 18,701 | **$0.0281 (−92.3%)** |
 
-Scale to 1,000 sessions: **$362 → $26**. In a controlled A/B/C/D run (`showcase/dashboard.html`, 2026-05-19) — 48 calls across 4 sessions, counterfactual bill **$5.90**, actual **$3.74** — net saved **$2.16 (−36.6%)**. One dev machine, one afternoon. Multiply by team scale, and that's a real server invoice every month.
+Scale to 1,000 sessions: **$362 → $26** — a real server invoice every month, multiplied by team size.
 
 **Stop measuring in "X× fewer tokens."** In 2026, the pricing gap between tiers of the same model family already spans **80×–150×**. Anyone can inflate a ratio by stuffing the cheapest tier in the denominator — absolute dollars are the only number that doesn't lie.
 
@@ -64,11 +64,12 @@ Scale to 1,000 sessions: **$362 → $26**. In a controlled A/B/C/D run (`showcas
 #### ❶ &nbsp;Install
 
 ```bash
-# Linux / macOS / WSL2 / Android (Termux)
+# Option A — one-line installer (Linux / macOS / WSL2 / Android Termux)
 curl -fsSL https://raw.githubusercontent.com/learningCatHD/telos-sdk/main/scripts/install.sh | bash
-```
 
-<sub>Prefer pip? &nbsp;`pip install -U telos-sdk`</sub>
+# Option B — pip (uv recommended as the package manager)
+uv pip install -U telos-sdk
+```
 
 #### ❷ &nbsp;Connect
 
@@ -127,9 +128,9 @@ Opens an offline HTML dashboard in your browser showing savings per call in abso
 
 <sub>Need another harness or model backend? TELOS is adapter-driven: keep the same IR and add an engine/harness adapter without rewriting your agent logic.</sub>
 
-### Coexisting with cc-switch
+### Support cc-switch
 
-[cc-switch](https://github.com/farion1231/cc-switch) is a popular desktop manager that switches Claude Code / Codex / OpenClaw / Hermes between providers by writing the **same** live config files TELOS writes. The two are **composable, not exclusive** — cc-switch picks *which upstream relay*, TELOS is a token-optimizing gateway that sits *in front of any upstream*:
+[cc-switch](https://github.com/farion1231/cc-switch) switches Claude Code / Codex / OpenClaw / Hermes between providers by writing the **same** live config files TELOS writes. The two are **composable, not exclusive** — cc-switch picks *which upstream relay*, TELOS is a token-optimizing gateway that sits *in front of any upstream*:
 
 ```
 Claude Code ──▶ TELOS gateway (127.0.0.1:7171) ──▶ cc-switch's chosen relay
@@ -150,7 +151,7 @@ Because cc-switch hot-rewrites the live config on every switch, run `telos ccswi
 
 ## ⬢ &nbsp;TELOS solves exactly two things
 
-**① Push token efficiency to the limit.** 6-turn real session **−92.3%**; controlled 48-call run **−36.6% (net −$2.16)**. Every cent accounted for in absolute $/query-resolved — ratios can be faked; dollars can't.
+**① Push token efficiency to the limit.** 6-turn real session **−92.3%**; SWE-bench Verified A/B **−40.5% end-to-end cost** at the same correctness band. Every cent accounted for in absolute $/query-resolved — ratios can be faked; dollars can't.
 
 **② Return context sovereignty to you.** `TelosIR` is an engine-agnostic, serializable, portable context representation. Your persona, your tools, your 20-turn mid-session thread — everything packed into the same **stone tablet**. Hand it to Claude today, move it to DeepSeek tomorrow, run it on a local vLLM tonight. **Your context; agents are just hired help.**
 
@@ -184,7 +185,7 @@ Paired 2×2 on the same 99 instances: both resolved 33; TELOS-only 12; vanilla-o
 
 **Read this honestly.** The 99-instance subset gives a Wilson CI of roughly ±10 pp on each arm. This run can rule out an absolute regression worse than ~6 pp at 95% confidence (the lower bound of the paired difference), but cannot pin Δ to ±2 pp. What it shows with high confidence is the **input-token bill is roughly halved, and end-to-end cost drops ~40%, at the same correctness band**. A larger run (n ≥ 400/arm) is on the roadmap to tighten the resolved-rate confidence interval further.
 
-<sub>Raw outputs: agent runs in [`/tmp/telos-ab-n100/{with,without}/`](/tmp/telos-ab-n100/), docker-graded reports in [`/tmp/telos-ab-n100/docker-eval/`](/tmp/telos-ab-n100/docker-eval/). Reproduce: `scripts/run_swebench_batch.py -n 100 --seed 7`. Full technical report (pre-registered design, statistical detail, related work): [docs/2026-05-26-swebench-ab.md](docs/2026-05-26-swebench-ab.md).</sub>
+<sub>Reproduce: `scripts/run_swebench_batch.py -n 100 --seed 7`. Full technical report (pre-registered design, statistical detail, related work): [docs/2026-05-26-swebench-ab.md](docs/swebench-ab.md).</sub>
 
 ---
 
