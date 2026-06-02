@@ -23,6 +23,16 @@
 
 </div>
 
+* * *
+
+**最新动态** 🔥
+
+* **[2026.05.31]** 与 [cc-switch](https://github.com/farion1231/cc-switch) 共存 —— TELOS 把网关挡在 cc-switch 选定的上游中转前面，不会有任何密钥被写入 TELOS 配置。
+* **[2026.05.29]** `telos init` 现在会在注册新的 harness 上游时自动重启网关，省去手动重启那一步。
+* **[2026.05.27]** Codex.app（ChatGPT 登录模式）成为一等 harness；安装器自动检测 `auth_mode` 并路由到正确的上游。
+
+* * *
+
 ---
 
 <a id="problem"></a>
@@ -38,7 +48,7 @@
 | passthrough（今天的默认） | 24,151 | 0 | **$0.3623** |
 | 使用 TELOS | 0 | 18,701 | **$0.0281（-92.3%）** |
 
-放大到 1,000 个会话：**$362 → $26**。在一次受控 A/B/C/D 运行中（`showcase/dashboard.html`，2026-05-19）——48 次调用、4 个会话，反事实账单 **$5.90**，实际 **$3.74**——净省 **$2.16（-36.6%）**。一台开发机，一个下午。乘上团队规模，就是每个月能看见的真实服务器账单。
+放大到 1,000 个会话：**$362 → $26** —— 每个月都能看见的真实服务器账单，再乘上团队规模。
 
 **不要再用“token 少了几倍”来衡量。** 到 2026 年，同一模型家族不同计费层级之间的价格差已经达到 **80x–150x**。任何人都能把最便宜的层级塞进分母来造出漂亮比例，只有绝对美元不会说谎。
 
@@ -53,11 +63,12 @@
 #### ❶ &nbsp;安装
 
 ```bash
-# Linux / macOS / WSL2 / Android (Termux)
+# 方式 A —— 一行安装脚本（Linux / macOS / WSL2 / Android Termux）
 curl -fsSL https://raw.githubusercontent.com/learningCatHD/telos-sdk/main/scripts/install.sh | bash
-```
 
-<sub>更喜欢 pip？&nbsp;`pip install -U telos-sdk`</sub>
+# 方式 B —— pip（推荐用 uv 作为包管理器）
+uv pip install -U telos-sdk
+```
 
 #### ❷ &nbsp;连接
 
@@ -115,9 +126,9 @@ telos dashboard
 
 <sub>还想接别的 harness 或模型后端？TELOS 是 adapter 驱动的：保留同一份 IR，新增 engine / harness 适配器即可，不需要重写 agent 逻辑。</sub>
 
-### 与 cc-switch 共存
+### 支持 cc-switch
 
-[cc-switch](https://github.com/farion1231/cc-switch) 是一个流行的桌面工具，通过改写 Claude Code / Codex / OpenClaw / Hermes 的本地配置文件来切换 provider —— 改写的正是 TELOS 也在写的那些文件。两者是**可组合而非互斥**的：cc-switch 负责选**哪个上游中转**，TELOS 是一个挡在**任意上游前面**的省 token 网关：
+[cc-switch](https://github.com/farion1231/cc-switch) 通过改写 Claude Code / Codex / OpenClaw / Hermes 的本地配置文件来切换 provider —— 改写的正是 TELOS 也在写的那些文件。两者是**可组合而非互斥**的：cc-switch 负责选**哪个上游中转**，TELOS 是一个挡在**任意上游前面**的省 token 网关：
 
 ```
 Claude Code ──▶ TELOS 网关 (127.0.0.1:7171) ──▶ cc-switch 选定的中转
@@ -138,7 +149,7 @@ telos ccswitch sync     # 在 cc-switch 切换 provider 后，重新把 TELOS �
 
 ## ⬢ &nbsp;TELOS 只解决两件事
 
-**① 把 token 效率推到极限。** 真实 6 轮会话 **-92.3%**；受控 48 次调用 **-36.6%（净省 -$2.16）**。每一分钱都按绝对 $/已解决请求 核算，比例可以造，美元造不了。
+**① 把 token 效率推到极限。** 真实 6 轮会话 **-92.3%**；SWE-bench Verified A/B 在同一正确率区间下端到端成本 **-40.5%**。每一分钱都按绝对 $/已解决请求 核算，比例可以造，美元造不了。
 
 **② 把上下文主权还给你。** `TelosIR` 是引擎无关、可序列化、可移植的上下文表示。你的 persona、你的 tools、你的 20 轮中段线程，全都封装在同一块“石碑”里。今天交给 Claude，明天迁到 DeepSeek，今晚跑在本地 vLLM 上。**上下文归你，agent 只是雇员。**
 
@@ -172,7 +183,7 @@ token 省下来才有意义，前提是 agent 还能把题做对。我们在 **S
 
 **诚实读这份数据：** 99 个实例的 Wilson CI 宽度约 ±10 pp。本次运行可以在 95% 置信下排除超过约 6 pp 的绝对回归（配对差的下界），但还无法把 Δ 钉到 ±2 pp 以内。能高置信确认的是 —— **在同一修复率区间下，计费输入 token 大约减半，端到端成本下降 ~40%**。路线图上有 n ≥ 400/臂 的复跑计划，用来把修复率的置信区间进一步收窄。
 
-<sub>原始产物：agent 运行在 [`/tmp/telos-ab-n100/{with,without}/`](/tmp/telos-ab-n100/)，docker 评测报告在 [`/tmp/telos-ab-n100/docker-eval/`](/tmp/telos-ab-n100/docker-eval/)。复现命令：`scripts/run_swebench_batch.py -n 100 --seed 7`。完整技术报告（预先登记设计、统计细节、相关工作）见 [docs/2026-05-26-swebench-ab.md](docs/2026-05-26-swebench-ab.md)。</sub>
+<sub>复现命令：`scripts/run_swebench_batch.py -n 100 --seed 7`。完整技术报告（预先登记设计、统计细节、相关工作）见 [docs/2026-05-26-swebench-ab.md](docs/swebench-ab.md)。</sub>
 
 ---
 
