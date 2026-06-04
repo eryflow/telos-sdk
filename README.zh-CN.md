@@ -21,7 +21,7 @@
 
 [**快速开始**](#quickstart) · [**四个承诺**](#guarantees) · [**支持矩阵**](#support-matrix) · [**为什么**](#why-telos) · [**Benchmark**](#benchmark) · [**协议**](#protocol) · [**路线图**](#roadmap) · [**引用**](#citation)
 
-<sub>📖 &nbsp;**English** · [简体中文](README.zh-CN.md)</sub>
+[📖 English](README.md) &nbsp;|&nbsp; **🇨🇳 简体中文**
 
 </div>
 

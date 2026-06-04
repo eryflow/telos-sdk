@@ -44,7 +44,7 @@ from typing import Any
 # Path constants (change as needed)
 # ---------------------------------------------------------------------------
 
-TELOS_ROOT = Path("/Users/george/Code/telos-pro")
+TELOS_ROOT = Path("/Users/george/Code/telos-sdk")
 HERMES_ROOT = TELOS_ROOT / "vendor" / "hermes"
 TEF_ROOT = Path("/Users/george/Code/token-efficient-framework")
 DEFAULT_DATASET = TEF_ROOT / "benchmark" / "datasets" / "swe-bench-verified.jsonl"

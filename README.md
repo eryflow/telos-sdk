@@ -22,7 +22,7 @@
 
 [**Quickstart**](#quickstart) · [**Guarantees**](#guarantees) · [**Support Matrix**](#support-matrix) · [**Why**](#why-telos) · [**Benchmark**](#benchmark) · [**Protocol**](#protocol) · [**Roadmap**](#roadmap) · [**Citation**](#citation)
 
-<sub>📖 &nbsp;**English** · [中文](README.zh-CN.md)</sub>
+**📖 English** &nbsp;|&nbsp; [🇨🇳 中文](README.zh-CN.md)
 
 </div>
 
