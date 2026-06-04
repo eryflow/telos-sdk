@@ -1,5 +1,0 @@
-# Mintlify local cache / build output
-.mint/
-.mintlify/
-node_modules/
-*.log
