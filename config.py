@@ -24,11 +24,13 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
 DEFAULT_GATEWAY_HOST = "127.0.0.1"
 DEFAULT_GATEWAY_PORT = 7171
@@ -187,6 +189,8 @@ class TelosConfig:
     favorite_harness: str | None = None
     harness_executables: dict[str, str] = field(default_factory=dict)
     upstreams: dict[str, UpstreamConfig] = field(default_factory=default_upstreams)
+    trace_harnesses: dict[str, dict[str, Any]] = field(default_factory=dict)
+    evolution_tasks: dict[str, dict[str, Any]] = field(default_factory=dict)
     _extra: dict[str, Any] = field(default_factory=dict, repr=False)
 
     def anthropic_upstream_url(self) -> str:
@@ -210,11 +214,28 @@ class TelosConfig:
         data["favorite_harness"] = self.favorite_harness
         data["harness_executables"] = dict(self.harness_executables)
         data["upstreams"] = _serialize_upstreams(self.upstreams)
+        data["trace_harnesses"] = {
+            name: dict(policy) for name, policy in self.trace_harnesses.items()
+        }
+        data["evolution_tasks"] = {
+            name: dict(policy) for name, policy in self.evolution_tasks.items()
+        }
         return data
 
 
 _KNOWN_KEYS = {"_schema", "mode", "gateway", "favorite_harness",
-               "harness_executables", "upstreams"}
+               "harness_executables", "upstreams", "trace_harnesses",
+               "evolution_tasks"}
+
+
+def _parse_policy_map(raw: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(name): dict(policy)
+        for name, policy in raw.items()
+        if isinstance(name, str) and isinstance(policy, dict)
+    }
 
 
 def load_config() -> TelosConfig:
@@ -253,6 +274,8 @@ def load_config() -> TelosConfig:
         favorite_harness=str(fav) if fav else None,
         harness_executables=harness_executables,
         upstreams=upstreams,
+        trace_harnesses=_parse_policy_map(data.get("trace_harnesses")),
+        evolution_tasks=_parse_policy_map(data.get("evolution_tasks")),
         _extra=extra,
     )
 
@@ -261,11 +284,19 @@ def save_config(cfg: TelosConfig) -> Path:
     """Atomically write back ``~/.telos/config.json``."""
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.parent.chmod(0o700)
+    except OSError:
+        pass
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(
         json.dumps(cfg.to_dict(), ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    try:
+        tmp.chmod(0o600)
+    except OSError:
+        pass
     os.replace(tmp, path)
     return path
 
@@ -290,6 +321,77 @@ def update_config(**fields: Any) -> TelosConfig:
         cfg.gateway.usage_log = str(fields["gateway_usage_log"] or "")
     save_config(cfg)
     return cfg
+
+
+def enable_harness_trace(harness: str) -> tuple[TelosConfig, bool]:
+    """Register one Harness for full local Trace capture, idempotently.
+
+    Returns ``(config, changed)``. Re-running init preserves the Reporter token
+    so installed hooks do not lose access when the gateway is restarted.
+    """
+    name = harness.strip()
+    if not name:
+        raise ValueError("harness name must not be empty")
+    cfg = load_config()
+    current = cfg.trace_harnesses.get(name) or {}
+    updated = dict(current)
+    updated["enabled"] = True
+    updated["capture"] = "full"
+    if not isinstance(updated.get("reporter_token"), str) or not updated["reporter_token"]:
+        updated["reporter_token"] = secrets.token_urlsafe(24)
+    if updated == current:
+        return cfg, False
+    cfg.trace_harnesses[name] = updated
+    save_config(cfg)
+    return cfg, True
+
+
+def disable_harness_trace(harness: str) -> tuple[TelosConfig, bool]:
+    """Disable future Reporter events for a Harness without deleting history."""
+    name = harness.strip()
+    cfg = load_config()
+    current = cfg.trace_harnesses.get(name)
+    if not current or current.get("enabled") is False:
+        return cfg, False
+    updated = dict(current)
+    updated["enabled"] = False
+    cfg.trace_harnesses[name] = updated
+    save_config(cfg)
+    return cfg, True
+
+
+def enable_evolution_task(task_type: str) -> tuple[TelosConfig, bool]:
+    """Persist the offline/manual-promotion policy for one TaskType."""
+    name = task_type.strip()
+    if not name:
+        raise ValueError("task type must not be empty")
+    cfg = load_config()
+    current = cfg.evolution_tasks.get(name) or {}
+    updated = dict(current)
+    updated["enabled"] = True
+    updated["evaluation"] = "offline"
+    updated["promotion"] = "manual"
+    if "created_at" not in updated:
+        updated["created_at"] = datetime.now(timezone.utc).isoformat()
+    if updated == current:
+        return cfg, False
+    cfg.evolution_tasks[name] = updated
+    save_config(cfg)
+    return cfg, True
+
+
+def disable_evolution_task(task_type: str) -> tuple[TelosConfig, bool]:
+    """Disable future evolution work for one TaskType without deleting evidence."""
+    name = task_type.strip()
+    cfg = load_config()
+    current = cfg.evolution_tasks.get(name)
+    if not current or current.get("enabled") is False:
+        return cfg, False
+    updated = dict(current)
+    updated["enabled"] = False
+    cfg.evolution_tasks[name] = updated
+    save_config(cfg)
+    return cfg, True
 
 
 def revert_upstreams_owned_by(via: str) -> tuple[Path | None, list[str]]:

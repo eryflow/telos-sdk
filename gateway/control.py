@@ -14,6 +14,7 @@ import urllib.request
 _CONTROL_PATH = "/__telos/control/mode"
 _RESET_PATH = "/__telos/control/reset"
 _DEVELOPER_PATH = "/__telos/developer.json"
+_REPORTER_PATH = "/__telos/reporter/events"
 _TIMEOUT_S = 3.0
 
 
@@ -104,3 +105,24 @@ def post_reset(host: str, port: int, *, keep_backup: bool = True) -> dict:
         raise RuntimeError(f"cannot connect to gateway: {e.reason}") from e
     except OSError as e:
         raise RuntimeError(f"cannot connect to gateway: {e}") from e
+
+
+def post_reporter_events(host: str, port: int, payload: dict) -> dict:
+    """Send one authenticated Harness Reporter batch to the local gateway."""
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        f"http://{host}:{port}{_REPORTER_PATH}", data=body, method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=_TIMEOUT_S) as resp:  # noqa: S310
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "replace")
+        raise RuntimeError(
+            f"gateway rejected Reporter event (HTTP {e.code}): {detail}"
+        ) from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"cannot connect to gateway: {e.reason}") from e
+    except (OSError, json.JSONDecodeError) as e:
+        raise RuntimeError(f"cannot send Reporter event: {e}") from e

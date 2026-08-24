@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
 import time
@@ -57,6 +58,7 @@ from telos.proxy.pipeline import (
     process_openai_request,
 )
 from telos.scripts.telos_anthropic_transport import _detect_harness_signal
+from telos.trace_store import REPORTER_EVENT_KINDS, TraceStore
 
 if TYPE_CHECKING:
     from telos.config import UpstreamConfig
@@ -99,6 +101,8 @@ _log = logging.getLogger("telos.proxy")
 # upstream, so retrying does not double-bill / double-process.
 _MAX_CONNECT_RETRIES = 3
 _CONNECT_BACKOFF_BASE = 0.5   # seconds; exponential backoff 0.5 / 1.0 / 2.0
+_MAX_REPORTER_BODY_BYTES = 1024 * 1024
+_MAX_REPORTER_EVENTS = 100
 
 
 def _wire_tool_result_first(req: Mapping[str, Any]) -> bool:
@@ -450,6 +454,8 @@ class ProxyApp:
         mode: TelosMode | None = None,
         corpus_dir: Path | None = None,
         record: bool = True,
+        trace_dir: Path | None = None,
+        trace_harnesses: Mapping[str, Mapping[str, Any]] | None = None,
     ):
         self.upstream = upstream.rstrip("/")
         # Named upstream table for the multi-backend ``/upstreams/<slug>/...``
@@ -470,6 +476,11 @@ class ProxyApp:
         # response. Can be turned off with --no-record.
         self._record = record
         self._corpus_dir = corpus_dir if record else None
+        self._trace_store = TraceStore(trace_dir)
+        self._trace_harnesses = (
+            {name: dict(policy) for name, policy in trace_harnesses.items()}
+            if trace_harnesses is not None else None
+        )
         # strict=False (default): on TELOS failure, pass through to upstream as-is,
         # guaranteeing the optimization layer never breaks correctness (the same
         # "rewrite fails → original command" principle as RTK).
@@ -1136,6 +1147,91 @@ class ProxyApp:
             "lines_cleared": lines,
             "backup": backup,
         })
+
+    # ------------------------------------------------------------------
+    # POST /__telos/reporter/events -- Harness-side facts (loopback only)
+    # ------------------------------------------------------------------
+
+    async def handle_reporter_events(self, request: web.Request) -> web.Response:
+        if not self._is_loopback(request):
+            return web.json_response(
+                {"error": "reporter endpoint is loopback-only"}, status=403)
+        body = await request.read()
+        if len(body) > _MAX_REPORTER_BODY_BYTES:
+            return web.json_response({"error": "reporter payload too large"}, status=413)
+        try:
+            payload = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return web.json_response({"error": "invalid JSON"}, status=400)
+        if not isinstance(payload, dict):
+            return web.json_response({"error": "top level must be an object"}, status=400)
+
+        harness = payload.get("harness")
+        session_id = payload.get("session_id")
+        token = payload.get("reporter_token")
+        events = payload.get("events")
+        if not isinstance(harness, str) or not harness.strip():
+            return web.json_response({"error": "harness is required"}, status=400)
+        if not isinstance(session_id, str) or not session_id.strip():
+            return web.json_response({"error": "session_id is required"}, status=400)
+        if not isinstance(token, str):
+            return web.json_response({"error": "invalid reporter token"}, status=401)
+
+        if self._trace_harnesses is None:
+            from telos.config import load_config
+            policies = load_config().trace_harnesses
+        else:
+            policies = self._trace_harnesses
+        policy = policies.get(harness)
+        expected = policy.get("reporter_token") if policy else None
+        if (not policy or policy.get("enabled") is not True
+                or not isinstance(expected, str)
+                or not hmac.compare_digest(token, expected)):
+            return web.json_response({"error": "invalid reporter token"}, status=401)
+        if (not isinstance(events, list) or not events
+                or len(events) > _MAX_REPORTER_EVENTS):
+            return web.json_response(
+                {"error": f"events must contain 1..{_MAX_REPORTER_EVENTS} items"},
+                status=400,
+            )
+
+        validated: list[tuple[str, str, dict[str, Any], str | None]] = []
+        for event in events:
+            if not isinstance(event, dict):
+                return web.json_response({"error": "each event must be an object"}, status=400)
+            event_id = event.get("event_id")
+            kind = event.get("kind")
+            data = event.get("data", {})
+            observed_at = event.get("observed_at")
+            if not isinstance(event_id, str) or not event_id or len(event_id) > 200:
+                return web.json_response(
+                    {"error": "event_id is required (max 200 chars)"}, status=400)
+            if kind not in REPORTER_EVENT_KINDS:
+                return web.json_response(
+                    {"error": f"unsupported event kind: {kind!r}"}, status=400)
+            if not isinstance(data, dict):
+                return web.json_response({"error": "event data must be an object"}, status=400)
+            if observed_at is not None and not isinstance(observed_at, str):
+                return web.json_response(
+                    {"error": "observed_at must be a string"}, status=400)
+            validated.append((event_id, kind, data, observed_at))
+
+        accepted: list[dict[str, Any]] = []
+        try:
+            for event_id, kind, data, observed_at in validated:
+                seq, created = self._trace_store.append(
+                    harness=harness,
+                    session_id=session_id,
+                    event_id=event_id,
+                    kind=kind,
+                    data=data,
+                    observed_at=observed_at,
+                )
+                accepted.append({"event_id": event_id, "seq": seq, "created": created})
+        except OSError:
+            _log.exception("reporter Trace write failed")
+            return web.json_response({"error": "local Trace write failed"}, status=500)
+        return web.json_response({"accepted": accepted})
 
     # ------------------------------------------------------------------
     # GET /__telos/developer -- developer-facing live session structure / tool-call statistics
@@ -2195,6 +2291,8 @@ def make_app(
     mode: TelosMode | None = None,
     corpus_dir: Path | None = None,
     record: bool = True,
+    trace_dir: Path | None = None,
+    trace_harnesses: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> web.Application:
     """Construct a complete aiohttp application. Reusable for tests / ASGI embedding."""
     proxy = ProxyApp(
@@ -2207,6 +2305,8 @@ def make_app(
         mode=mode,
         corpus_dir=corpus_dir,
         record=record,
+        trace_dir=trace_dir,
+        trace_harnesses=trace_harnesses,
     )
     # client_max_size: aiohttp defaults to only 1 MiB. Harnesses like Claude Code, in a
     # long conversation, produce a single request body (full messages history + system +
@@ -2231,6 +2331,7 @@ def make_app(
     app.router.add_route("GET", "/__telos/control/mode", proxy.handle_control_mode)
     app.router.add_route("POST", "/__telos/control/mode", proxy.handle_control_mode)
     app.router.add_post("/__telos/control/reset", proxy.handle_control_reset)
+    app.router.add_post("/__telos/reporter/events", proxy.handle_reporter_events)
     app.router.add_get("/__telos/developer", proxy.handle_developer)
     app.router.add_get("/__telos/developer.json", proxy.handle_developer_json)
     app.router.add_route("*", "/{tail:.*}", proxy.handle_passthrough)
@@ -2252,6 +2353,8 @@ def run(
     mode: TelosMode | None = None,
     corpus_dir: Path | None = None,
     record: bool = True,
+    trace_dir: Path | None = None,
+    trace_harnesses: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> None:
     """Blocking startup (for the CLI entry point)."""
     logging.basicConfig(
@@ -2269,6 +2372,8 @@ def run(
         mode=mode,
         corpus_dir=corpus_dir,
         record=record,
+        trace_dir=trace_dir,
+        trace_harnesses=trace_harnesses,
     )
     _log.info("TELOS gateway listening on http://%s:%d → %s", host, port, upstream)
     _log.info("default mode  → %s (telos=%s rtk=%s); a single request can override with X-Telos-Mode",

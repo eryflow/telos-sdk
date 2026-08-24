@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import tempfile
 from pathlib import Path
 
@@ -133,6 +134,43 @@ def test_revert_upstreams_owned_by() -> None:
     print("✓ test_revert_upstreams_owned_by")
 
 
+def test_harness_trace_registration_is_idempotent() -> None:
+    _with_home(_tmp_home())
+    first, changed = cfgmod.enable_harness_trace("codex")
+    assert changed is True
+    token = first.trace_harnesses["codex"]["reporter_token"]
+    second, changed = cfgmod.enable_harness_trace("codex")
+    assert changed is False
+    assert second.trace_harnesses["codex"]["reporter_token"] == token
+    disabled, changed = cfgmod.disable_harness_trace("codex")
+    assert changed is True
+    assert disabled.trace_harnesses["codex"]["enabled"] is False
+    assert disabled.trace_harnesses["codex"]["reporter_token"] == token
+
+
+def test_evolution_task_policy_is_idempotent() -> None:
+    _with_home(_tmp_home())
+    first, changed = cfgmod.enable_evolution_task("代码缺陷修复")
+    assert changed is True
+    created_at = first.evolution_tasks["代码缺陷修复"]["created_at"]
+    second, changed = cfgmod.enable_evolution_task("代码缺陷修复")
+    assert changed is False
+    policy = second.evolution_tasks["代码缺陷修复"]
+    assert policy["created_at"] == created_at
+    assert policy["evaluation"] == "offline"
+    assert policy["promotion"] == "manual"
+
+
+def test_saved_config_is_private_on_posix() -> None:
+    if os.name != "posix":
+        return
+    home = _tmp_home()
+    _with_home(home)
+    cfgmod.save_config(cfgmod.TelosConfig())
+    assert stat.S_IMODE(home.stat().st_mode) == 0o700
+    assert stat.S_IMODE((home / "config.json").stat().st_mode) == 0o600
+
+
 def main() -> None:
     test_load_missing_returns_defaults()
     test_save_load_round_trip()
@@ -140,6 +178,9 @@ def main() -> None:
     test_unknown_keys_preserved()
     test_bad_json_raises()
     test_revert_upstreams_owned_by()
+    test_harness_trace_registration_is_idempotent()
+    test_evolution_task_policy_is_idempotent()
+    test_saved_config_is_private_on_posix()
     print("\nall config tests passed.")
 
 

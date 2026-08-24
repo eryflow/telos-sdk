@@ -1,27 +1,21 @@
 <div align="center">
 
-<img src="assets/logo.svg" alt="TELOS — 可移植 Agent 上下文" width="460"/>
+<img src="assets/logo.svg" alt="TELOS — 私有 Agent 上下文" width="460"/>
 
-### 上下文归你所有 &nbsp;·&nbsp; Agent 是雇来的
+### 上下文归你，经验留下，Agent 持续变好
 
-**无需重写。无需压缩。可节省高达 90% token 账单。**
+**将长任务上下文私有化，把真实生产轨迹变成可回放样本与离线进化证据。**
 
-<sub>💰 **token 账单 −50–90%** &nbsp;·&nbsp; 🎯 **agent 行为不变** &nbsp;·&nbsp; ⚡ **更快，不更慢** &nbsp;·&nbsp; 🔒 **不捕获任何内容**</sub>
-
-<sub>一份唯一 IR——tools、system、turns 与 memory——可在 Anthropic · OpenAI · DeepSeek · vLLM · SGLang 上不加修改地运行</sub>
-
-<sub>清华大学 LEAP Lab —— 聚焦机器学习、多模态学习与具身智能的研究团队 · <a href="https://www.leaplab.ai/">leaplab.ai</a></sub>
+<sub>🔒 本地优先 &nbsp;·&nbsp; 🔌 Harness 无关 &nbsp;·&nbsp; ⏪ 可回放 &nbsp;·&nbsp; 🧬 为持续进化而生</sub>
 
 <br/>
 
 [![Core](https://img.shields.io/badge/core-Apache%202.0-2C5F66?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-4FB3BF?style=flat-square)](pyproject.toml)
 [![Status](https://img.shields.io/badge/status-Beta-d8851f?style=flat-square)](CHANGELOG.md)
-[![Protocol](https://img.shields.io/badge/protocol-TELOS%20IR-7FD8E0?style=flat-square)](https://docs.telosai.pro/zh/concepts/protocol)
+[![Version](https://img.shields.io/badge/version-0.1.8-4FB3BF?style=flat-square)](CHANGELOG.md)
 
-### 📖 完整文档 → **[docs.telosai.pro](https://docs.telosai.pro/zh)**
-
-[**快速开始**](#quickstart) &nbsp;·&nbsp; [**四个承诺**](#guarantees) &nbsp;·&nbsp; [**文档**](https://docs.telosai.pro/zh) &nbsp;·&nbsp; [**Benchmark**](https://docs.telosai.pro/zh/benchmark/swebench) &nbsp;·&nbsp; [**协议**](https://docs.telosai.pro/zh/concepts/protocol)
+[**快速开始**](#quickstart) &nbsp;·&nbsp; [**工作原理**](#how-it-works) &nbsp;·&nbsp; [**当前能力**](#what-ships-today) &nbsp;·&nbsp; [**设计决策**](docs/adr/0001-local-trace-and-task-type-evolution.md)
 
 [📖 English](README.md) &nbsp;|&nbsp; **🇨🇳 简体中文**
 
@@ -29,85 +23,170 @@
 
 ---
 
-**最新动态** 🔥
+## 从 Agent 网关到 Agent 学习系统
 
-* **[2026.06.06]** 文档站正式上线 → **[docs.telosai.pro](https://docs.telosai.pro/zh)** —— 完整指南、协议详解、支持矩阵与 SWE-bench 报告，中英文双语。
-* **[2026.05.31]** 与 [cc-switch](https://github.com/farion1231/cc-switch) 共存 —— TELOS 把网关挡在 cc-switch 选定的上游中转前面，不会有任何密钥被写入 TELOS 配置。
-* **[2026.05.29]** `telos init` 现在会在注册新的 harness 上游时自动重启网关，省去手动重启那一步。
-* **[2026.05.27]** Codex.app（ChatGPT 登录模式）成为一等 harness；安装器自动检测 `auth_mode` 并路由到正确的上游。
+Agent 已经可以连续工作数小时，但它的运行上下文仍寄存在某个 Harness 中，散落在不透明的日志里，并随任务结束而丢失。同一种失败会反复修复，真实生产经验很少能沉淀为回归样本、离线评测或训练数据。
 
----
+TELOS 是位于 Agent Harness 与模型之间的本地控制面。它的目标是让长任务上下文：
 
-## ⬢ &nbsp;TELOS 是什么？
+- **私有**：持久化在你控制的本地环境中，没有 TELOS 云端遥测。
+- **可迁移**：不被某个 Harness 或模型供应商绑定。
+- **可回放**：真实生产任务可以转化为可复现样本。
+- **可进化**：结果证据可以驱动 Prompt、Tool、Workflow 和模型路由的离线评测。
 
-TELOS 是一个挡在 agent 与模型之间的缓存感知网关。它重排 proxy→上游这一段，让共享前缀由缓存（`cache_read`）命中，而不是每轮按全价重新计费——**不改你的 prompt、不换你的模型、不改 agent 的行为**。
+Prompt Cache 优化仍然是 TELOS 的底层能力，但它现在服务于更完整的目标：**留下上下文，从工作中学习，让下一次执行更好。**
 
-把一段真实 **6 轮** 会话丢进 openclaw，只改两个开关：
+<a id="how-it-works"></a>
 
-| 模式 | raw input tokens | cache_read | 6 轮总成本 |
-|---|:--:|:--:|:--:|
-| passthrough（今天的默认） | 24,151 | 0 | **$0.3623** |
-| 使用 TELOS | 0 | 18,701 | **$0.0281（−92.3%）** |
+## 工作原理
 
-放大到 1,000 个会话：**$362 → $26**，每个月都能看见，再乘上团队规模。我们按绝对 $/已解决请求 记录节省——比例可以造，美元不行。
+```mermaid
+flowchart LR
+    H["Agent Harness<br/>Codex · Claude Code · OpenClaw · Hermes"] --> G["本地 TELOS Gateway"]
+    G --> M["你的模型供应商"]
+    G --> C["本地请求 Corpus"]
+    H -. "Reporter 事件" .-> T["本地生命周期 Trace"]
+    C --> R["回放与回归样本"]
+    T --> R
+    R --> E["自动离线评测"]
+    E --> O["Prompt · Tool · Workflow · 模型路由候选"]
+    O -. "人工发布" .-> H
+```
 
-→ 完整背景请见[**文档**](https://docs.telosai.pro/zh)。
+TELOS 保存两类互补记录：
+
+1. **Gateway Corpus** 保存模型请求，用于确定性回放与成本对比。
+2. **Harness Reporter Trace** 保存模型 API 看不到的生命周期事件：执行尝试、工具结果、审批、工作区变更、产物、反馈与最终结果。
+
+两者通过 `session_id` 关联为同一份任务历史，同时保留既有 replay 数据格式。
+
+<a id="what-ships-today"></a>
+
+## 当前能力
+
+| 能力 | 状态 |
+|---|---|
+| 为 Codex、Claude Code、OpenClaw 和 Hermes 注入本地 Gateway | **已可用** |
+| 在本地记录模型请求 Corpus，并跨模式回放会话 | **已可用** |
+| 带鉴权的 Reporter 接口与本地 append-only 事件存储 | **已可用** |
+| `telos evolve --task` 任务类型策略，默认离线评测、人工发布 | **已可用** |
+| 为每个 Harness 自动采集 Tool、Approval、Workspace 事件的原生 Reporter Hook | **下一阶段** |
+| 自动结果标注、失败归因、回归集生成和候选方案评测 | **下一阶段** |
+| SFT/RL 数据集导出 | **规划中** |
+
+当前 `evolve` 命令只负责配置进化策略，尚不会启动评测 Worker，也不会自动修改生产 Agent 行为。
 
 <a id="quickstart"></a>
 
-## ⬢ &nbsp;快速开始 —— 3 步省下 90%
+## 快速开始
 
 ```bash
-# ❶ 安装 —— 一行脚本（Linux / macOS / WSL2 / Android Termux）
+# 安装（Linux / macOS / WSL2 / Android Termux）
 curl -fsSL https://raw.githubusercontent.com/learningCatHD/telos-sdk/main/scripts/install.sh | bash
-# …或用 pip：  uv pip install -U telos-sdk
+# 或：uv pip install -U telos-sdk
 
-# ❷ 连接 —— 自动检测 claude-code / codex / openclaw / hermes，注入配置，
-#    并在后台启动本地网关。不需要改 agent 代码。
-telos init
+# 接管一个 Harness。之后新启动的 Codex 进程会经过本地 Gateway。
+telos init --harness codex
 
-# ❸ 观察 —— 打开离线 HTML 看板，以绝对美元展示节省
+# 为某类任务开启离线进化策略。
+telos evolve --task "代码缺陷修复"
+
+# 查看 Harness 注入、Gateway 和流量转发状态。
+telos status
+```
+
+执行 `telos init` 后请启动一个新的 Harness 进程；已经运行的进程不会追溯加载新的模型供应商配置。
+
+查看流量和成本节省：
+
+```bash
 telos dashboard
 ```
 
-<p align="center">
-  <img src="assets/05-dashboard.png" alt="TELOS savings dashboard — absolute dollars broken down by harness / model / session" width="100%"/>
-</p>
+## 默认私有、随时迁移
 
-→ 详细的[安装](https://docs.telosai.pro/zh/start/installation)与[快速开始](https://docs.telosai.pro/zh/start/quickstart)指南，以及 [cc-switch 共存](https://docs.telosai.pro/zh/guides/integration-paths)说明，都在文档里。
+TELOS 将状态持久化到 `~/.telos/`：
 
-<a id="guarantees"></a>
-
-## ⬢ &nbsp;你真正关心的四件事
-
-TELOS 改变的是**你被计费的内容**，而不是**你的 agent 做什么**。
-
-| 你关心的 | 承诺 |
+| 路径 | 内容 |
 |---|---|
-| 💰 **Token 账单** | **计费输入 token 降低 50%–90%。** 6 轮真实会话 −92.3%；SWE-bench Verified new_input −52.8% / 端到端成本 −40.5%。 |
-| 🎯 **Agent 行为** | **完全不变。** 同一个模型、同样的 prompt 语义、同样的输出。SWE-bench A/B：McNemar p = 0.66，解决率无回归。 |
-| ⚡ **推理速度** | **不会更慢，只会更快。** 缓存命中跳过对已提交字节的重新 prefill，会话越长，首 token 时延越低。 |
-| 🔒 **你的数据** | **不捕获任何具体内容。** 网关跑在 `127.0.0.1`；用量日志只记录 token 计数，从不记录 prompt/回复正文。无云端、无遥测。 |
+| `config.json` | Gateway、Harness Trace 和进化策略；包含本地 Reporter Token |
+| `corpus/` | 用于回放的原始模型请求 |
+| `traces/<harness>/` | append-only Reporter 事件流 |
+| `usage.jsonl` | Token 用量与成本指标 |
 
-→ 每个承诺为何成立的详细论证：[**docs.telosai.pro**](https://docs.telosai.pro/zh)。
+这些文件可能包含 Prompt、源代码、工具结果，以及模型请求中出现的凭据，应按敏感数据保护。TELOS 不会把它们上传到 TELOS 服务，但你配置的模型供应商仍会收到完成推理所需的请求。
 
-## ⬢ &nbsp;了解更多
+迁移时，停止 Gateway，安全复制完整的 `~/.telos/` 目录，再在目标设备启动 TELOS 即可；不依赖托管控制面或专有数据库。
 
-| 主题 | 位置 |
+## Trace 数据模型
+
+TELOS 使用一套贴合 Agent 实际工作的最小层级：
+
+```text
+TaskType  →  TaskRun  →  Attempt  →  Event
+```
+
+- **TaskType**：可复用的任务类别，例如“代码缺陷修复”。
+- **TaskRun**：一次具体任务及其输入和验收标准。
+- **Attempt**：某组 Prompt、Tool、Workflow 和模型配置下的一次执行。
+- **Event**：Attempt 中按顺序发生的事实。
+
+Hook Adapter 可以通过 CLI 上报生命周期事件，无需自行读取 Reporter 凭据：
+
+```bash
+telos report \
+  --harness codex \
+  --session task-123 \
+  --event tool.finished \
+  --data '{"tool":"pytest","exit_code":1}'
+```
+
+本地存储会分配单调递增序号、按 `event_id` 去重，并为每个 Harness Session 写入独立 JSONL 事件流。
+
+## 自我进化契约
+
+目标闭环默认离线运行，并以证据为门槛：
+
+```text
+生产 Trace
+  → 结果标签与失败归因
+  → 冻结的回归样本
+  → 单变量候选改动
+  → 配对离线评测
+  → 优化建议
+  → 人工发布
+```
+
+每个候选方案只改变 Prompt、Tool 策略、Workflow 或模型路由中的一项，避免多个变量同时变化而无法归因。私有评测标准不会进入候选生成上下文；通过评测的候选只会被推荐，不会静默发布到生产环境。
+
+完整取舍、替代方案与阶段边界见 [ADR-0001：本地 Trace 与按任务类型持续进化](docs/adr/0001-local-trace-and-task-type-evolution.md)。
+
+## 上下文与成本优化仍然存在
+
+TELOS 仍会把 Agent 上下文规范化为稳定 IR，并为模型供应商的 KV Cache 复用进行排列。在既有的 OpenClaw 六轮实测中，总成本从 `$0.3623` 降至 `$0.0281`（`−92.3%`）；SWE-bench Verified 测得 new input `−52.8%`、端到端成本 `−40.5%`，解决率无统计显著回归。
+
+详见[协议](https://docs.telosai.pro/zh/concepts/protocol)、[Benchmark 方法](https://docs.telosai.pro/zh/benchmark/swebench)和[支持矩阵](https://docs.telosai.pro/zh/reference/support-matrix)。
+
+## 文档
+
+| 主题 | 参考 |
 |---|---|
-| **协议** —— 三色带（PIN/FOLD/DROP）与单调追加 | [concepts/protocol](https://docs.telosai.pro/zh/concepts/protocol) · [concepts/bands](https://docs.telosai.pro/zh/concepts/bands) |
-| **支持矩阵** —— harness、frontier model、推理框架、cc-switch | [reference/support-matrix](https://docs.telosai.pro/zh/reference/support-matrix) |
-| **SWE-bench Verified A/B** —— 预先登记设计、统计细节、完整报告 | [benchmark/swebench](https://docs.telosai.pro/zh/benchmark/swebench) |
-| **架构与接入方式** | [concepts/architecture](https://docs.telosai.pro/zh/concepts/architecture) · [guides/integration-paths](https://docs.telosai.pro/zh/guides/integration-paths) |
-| **CLI 参考与更新日志** | [reference/cli](https://docs.telosai.pro/zh/reference/cli) · [CHANGELOG.md](CHANGELOG.md) |
+| 本地 Trace 与进化决策 | [ADR-0001](docs/adr/0001-local-trace-and-task-type-evolution.md) |
+| 当前实现架构 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| 安装与集成 | [docs.telosai.pro](https://docs.telosai.pro/zh/start/installation) |
+| 版本历史 | [CHANGELOG.md](CHANGELOG.md) |
 
-**TELOS 是开源的。把它接到你的真实工作流里，看看那 92% 到底是真收益，还是又一个“X 倍 token”说法。**
+## 参与贡献与许可证
 
-<a id="citation"></a>
+欢迎提交 Issue 和 Pull Request。运行测试：
+
+```bash
+pytest
+```
+
+TELOS Core 使用 [Apache 2.0](LICENSE) 许可证。
 
 ## Citation
-
-Core contributors: Zheng Wang, Shenzhi Wang, HongTao Zhong, Shiji Song, Gao Huang
 
 ```bibtex
 @misc{wang2026telos-agent,
@@ -118,10 +197,8 @@ Core contributors: Zheng Wang, Shenzhi Wang, HongTao Zhong, Shiji Song, Gao Huan
 }
 ```
 
----
-
 <div align="center">
-<a href="https://github.com/learningCatHD/telos-sdk"><img src="https://img.shields.io/badge/⭐%20Star%20on%20GitHub-learningCatHD%2Ftelos--sdk-1F4A50?style=for-the-badge&logo=github&logoColor=white" alt="Star on GitHub"/></a>
 
-<sub>📖 完整文档见 <a href="https://docs.telosai.pro/zh">docs.telosai.pro</a></sub>
+**留下上下文，从工作中学习，让下一次执行更好。**
+
 </div>

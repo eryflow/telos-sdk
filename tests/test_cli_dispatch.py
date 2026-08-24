@@ -7,6 +7,8 @@ import io
 import json
 import os
 import tempfile
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from telos import cli
 from telos.init.__main__ import uninstall_main
@@ -73,6 +75,41 @@ def test_mode_rejects_bad_label() -> None:
     assert rc == 2
     assert "unknown mode" in out
     print("✓ test_mode_rejects_bad_label")
+
+
+def test_evolve_task_round_trip() -> None:
+    _iso_home()
+    rc, out = _run(["evolve", "--task", "代码缺陷修复"])
+    assert rc == 0
+    assert "evaluation policy: offline" in out
+    assert "evaluator worker: not shipped yet" in out
+    rc, out = _run(["evolve"])
+    assert rc == 0
+    assert "代码缺陷修复" in out
+    import telos.config as cfgmod
+    policy = cfgmod.load_config().evolution_tasks["代码缺陷修复"]
+    assert policy["enabled"] is True
+    assert policy["promotion"] == "manual"
+
+
+def test_report_uses_registered_token_without_printing_it() -> None:
+    _iso_home()
+    import telos.config as cfgmod
+    cfg, _ = cfgmod.enable_harness_trace("codex")
+    token = cfg.trace_harnesses["codex"]["reporter_token"]
+    state = SimpleNamespace(host="127.0.0.1", port=7171)
+    response = {"accepted": [{"event_id": "event-1", "seq": 1, "created": True}]}
+    with patch("telos.gateway.daemon.read_state", return_value=state), patch(
+        "telos.gateway.control.post_reporter_events", return_value=response,
+    ) as post:
+        rc, out = _run([
+            "report", "--harness", "codex", "--session", "session-1",
+            "--event", "attempt.started", "--event-id", "event-1",
+        ])
+    assert rc == 0
+    assert "seq=1" in out
+    assert token not in out
+    assert post.call_args.args[2]["reporter_token"] == token
 
 
 def test_dashboard_rejects_bad_verb() -> None:
@@ -159,6 +196,17 @@ def test_uninstall_skips_uninjected_harness() -> None:
     print("✓ test_uninstall_skips_uninjected_harness")
 
 
+def test_uninstall_disables_stale_trace_registration() -> None:
+    _iso_home()
+    import telos.config as cfgmod
+    cfgmod.enable_harness_trace("claude-code")
+    with _isolated_claude_dir():
+        rc, out = _run_uninstall(["--harness", "claude-code"])
+    assert rc == 0
+    assert "local Trace disabled" in out
+    assert cfgmod.load_config().trace_harnesses["claude-code"]["enabled"] is False
+
+
 def test_uninstall_reverts_injected_harness() -> None:
     _iso_home()
     with _isolated_claude_dir() as d:
@@ -183,12 +231,15 @@ def main() -> None:
     test_alias_rejects_unknown()
     test_mode_persists_without_gateway()
     test_mode_rejects_bad_label()
+    test_evolve_task_round_trip()
+    test_report_uses_registered_token_without_printing_it()
     test_dashboard_rejects_bad_verb()
     test_status_without_gateway()
     test_status_json_is_parseable()
     test_status_rejects_bad_option()
     test_uninstall_unknown_harness_suggests()
     test_uninstall_skips_uninjected_harness()
+    test_uninstall_disables_stale_trace_registration()
     test_uninstall_reverts_injected_harness()
     print("\nall cli dispatch tests passed.")
 

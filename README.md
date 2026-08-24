@@ -1,28 +1,21 @@
 <div align="center">
 
-<img src="assets/logo.svg" alt="TELOS — Portable Agent Context" width="460"/>
+<img src="assets/logo.svg" alt="TELOS — Private Agent Context" width="460"/>
 
-### Context is yours &nbsp;·&nbsp; Agents are hired
+### Your context. Your evidence. Your agent gets better.
 
-**No rewrite. No compression. Up to 90% token billing saving.**
+**Own long-running agent context locally, replay real work, and turn production traces into offline improvements.**
 
-<sub>💰 **−50–90% token bill** &nbsp;·&nbsp; 🎯 **Same agent behavior** &nbsp;·&nbsp; ⚡ **Faster, not slower** &nbsp;·&nbsp; 🔒 **Captures no content**</sub>
-
-<sub>One canonical IR — tools, system, turns, and memory — runs unchanged across Anthropic · OpenAI · DeepSeek · vLLM · SGLang</sub>
-
-<sub>LEAP Lab @ Tsinghua University — machine learning, multimodal learning, and embodied intelligence · <a href="https://www.leaplab.ai/">leaplab.ai</a></sub>
+<sub>🔒 Local-first &nbsp;·&nbsp; 🔌 Harness-agnostic &nbsp;·&nbsp; ⏪ Replayable &nbsp;·&nbsp; 🧬 Built for continuous evolution</sub>
 
 <br/>
 
 [![Core](https://img.shields.io/badge/core-Apache%202.0-2C5F66?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-4FB3BF?style=flat-square)](pyproject.toml)
 [![Status](https://img.shields.io/badge/status-Beta-d8851f?style=flat-square)](CHANGELOG.md)
-[![Protocol](https://img.shields.io/badge/protocol-TELOS%20IR-7FD8E0?style=flat-square)](https://docs.telosai.pro/en/concepts/protocol)
 [![Version](https://img.shields.io/badge/version-0.1.8-4FB3BF?style=flat-square)](CHANGELOG.md)
 
-### 📖 Full documentation → **[docs.telosai.pro](https://docs.telosai.pro)**
-
-[**Quickstart**](#quickstart) &nbsp;·&nbsp; [**Guarantees**](#guarantees) &nbsp;·&nbsp; [**Docs**](https://docs.telosai.pro) &nbsp;·&nbsp; [**Benchmark**](https://docs.telosai.pro/en/benchmark/swebench) &nbsp;·&nbsp; [**Protocol**](https://docs.telosai.pro/en/concepts/protocol)
+[**Quickstart**](#quickstart) &nbsp;·&nbsp; [**How it works**](#how-it-works) &nbsp;·&nbsp; [**What ships today**](#what-ships-today) &nbsp;·&nbsp; [**Design**](docs/adr/0001-local-trace-and-task-type-evolution.md)
 
 **📖 English** &nbsp;|&nbsp; [🇨🇳 中文](README.zh-CN.md)
 
@@ -30,85 +23,170 @@
 
 ---
 
-**News** 🔥
+## From an agent gateway to an agent learning system
 
-* **[2026.06.06]** Documentation site is live → **[docs.telosai.pro](https://docs.telosai.pro)** — full guides, protocol deep-dive, support matrix, and the SWE-bench report, in English and 中文.
-* **[2026.05.31]** Coexists with [cc-switch](https://github.com/farion1231/cc-switch) — TELOS chains its gateway in front of whatever upstream relay cc-switch selects, no secret ever copied into TELOS config.
-* **[2026.05.29]** `telos init` now auto-restarts the gateway when a new harness upstream is registered, dropping the manual restart step.
-* **[2026.05.27]** Codex.app (ChatGPT login mode) is now a first-class harness; the installer auto-detects `auth_mode` and routes through the correct upstream.
+Agents can work for hours, but their operating context is still rented from a harness, scattered across opaque logs, and discarded when the task ends. Failures get fixed once and then rediscovered. Useful production experience rarely becomes a regression case, an evaluation, or training data.
 
----
+TELOS is a local control plane between agent harnesses and models. Its goal is to make long-running agent context:
 
-## ⬢ &nbsp;What is TELOS?
+- **Private** — persisted under your control, with no TELOS cloud telemetry.
+- **Portable** — independent of a single harness or model provider.
+- **Replayable** — production work can become reproducible task samples.
+- **Evolvable** — outcomes can feed offline evaluation of prompts, tools, workflows, and model routing.
 
-TELOS is a cache-aware gateway that sits between your agent and the model. It restructures the proxy→upstream segment so the shared prefix is served from cache (`cache_read`) instead of being re-billed at full price every turn — **without changing your prompts, your model, or your agent's behavior**.
+Prompt-cache optimization remains part of TELOS. It is now one runtime primitive inside a larger system: **keep the context, learn from the work, improve the next attempt.**
 
-Take a real **6-turn** conversation through openclaw and flip two switches:
+<a id="how-it-works"></a>
 
-| Mode | raw input tokens | cache_read | Cost for 6 turns |
-|---|:--:|:--:|:--:|
-| passthrough (today's default) | 24,151 | 0 | **$0.3623** |
-| with TELOS | 0 | 18,701 | **$0.0281 (−92.3%)** |
+## How it works
 
-Scale to 1,000 sessions: **$362 → $26**, every month, multiplied by team size. We report savings in absolute $/query-resolved — ratios can be gamed; dollars can't.
+```mermaid
+flowchart LR
+    H["Agent harness<br/>Codex · Claude Code · OpenClaw · Hermes"] --> G["Local TELOS gateway"]
+    G --> M["Your model provider"]
+    G --> C["Local request corpus"]
+    H -. "Reporter events" .-> T["Local lifecycle trace"]
+    C --> R["Replay and regression cases"]
+    T --> R
+    R --> E["Offline evaluation"]
+    E --> O["Prompt · Tool · Workflow · Model routing candidates"]
+    O -. "manual promotion" .-> H
+```
 
-→ Read the full story in the [**docs**](https://docs.telosai.pro).
+TELOS keeps two complementary records:
+
+1. The **gateway corpus** stores model requests for deterministic replay and cost comparison.
+2. The **Harness Reporter trace** stores lifecycle events the model API cannot see: attempts, tool results, approvals, workspace changes, artifacts, feedback, and final outcomes.
+
+They are correlated by `session_id` and become one task history without forcing existing replay data into a new format.
+
+<a id="what-ships-today"></a>
+
+## What ships today
+
+| Capability | Status |
+|---|---|
+| Inject the local gateway into Codex, Claude Code, OpenClaw, and Hermes | **Available** |
+| Record model-request corpus locally and replay sessions across modes | **Available** |
+| Authenticated Reporter endpoint and append-only local event store | **Available** |
+| `telos evolve --task` task-type policy with offline evaluation and manual promotion settings | **Available** |
+| Native Reporter hooks that capture every tool/approval/workspace event from each harness | **Next** |
+| Automatic outcome labeling, failure attribution, regression generation, and candidate evaluation | **Next** |
+| SFT/RL dataset export | **Planned** |
+
+The current `evolve` command configures the evolution policy. It does **not** yet run an evaluator worker or modify production agent behavior.
 
 <a id="quickstart"></a>
 
-## ⬢ &nbsp;Quickstart — 3 steps to save 90%
+## Quickstart
 
 ```bash
-# ❶ Install — one-line script (Linux / macOS / WSL2 / Android Termux)
+# Install (Linux / macOS / WSL2 / Android Termux)
 curl -fsSL https://raw.githubusercontent.com/learningCatHD/telos-sdk/main/scripts/install.sh | bash
-# …or pip:  uv pip install -U telos-sdk
+# Or: uv pip install -U telos-sdk
 
-# ❷ Connect — auto-detects claude-code / codex / openclaw / hermes, injects
-#    config, and starts the local gateway. No changes to your agent code.
-telos init
+# Connect one harness. Future Codex processes route through the local gateway.
+telos init --harness codex
 
-# ❸ Observe — opens an offline HTML dashboard of savings in absolute dollars
+# Opt a task type into the offline-evolution policy.
+telos evolve --task "code defect repair"
+
+# Inspect harness injection, gateway state, and traffic forwarding.
+telos status
+```
+
+Start a new harness process after `telos init`; already-running processes do not retroactively reload their provider configuration.
+
+For savings and traffic visibility:
+
+```bash
 telos dashboard
 ```
 
-<p align="center">
-  <img src="assets/05-dashboard.png" alt="TELOS savings dashboard — absolute dollars broken down by harness / model / session" width="100%"/>
-</p>
+## Private and portable by default
 
-→ Detailed [installation](https://docs.telosai.pro/en/start/installation) and [quickstart](https://docs.telosai.pro/en/start/quickstart) guides, including [cc-switch coexistence](https://docs.telosai.pro/en/guides/integration-paths), live in the docs.
+TELOS persists its state under `~/.telos/`:
 
-<a id="guarantees"></a>
-
-## ⬢ &nbsp;Four things you actually care about
-
-TELOS changes *what you are billed for*, not *what your agent does*.
-
-| What you care about | The guarantee |
+| Path | Contents |
 |---|---|
-| 💰 **Token bill** | **−50% to −90% on billed input tokens.** 6-turn real session −92.3%; SWE-bench Verified −52.8% new_input / −40.5% end-to-end cost. |
-| 🎯 **Agent behavior** | **Unchanged.** Same model, same prompt semantics, same outputs. SWE-bench A/B: McNemar p = 0.66, no resolved-rate regression. |
-| ⚡ **Inference speed** | **Not slower — faster.** Cache hits skip re-prefilling submitted bytes, so time-to-first-token falls as the session grows. |
-| 🔒 **Your data** | **Captures no content.** Gateway runs on `127.0.0.1`; the usage log records token counts only — never prompt/response text. No cloud, no telemetry. |
+| `config.json` | Gateway, harness Trace, and evolution policies; includes local Reporter tokens |
+| `corpus/` | Raw model requests used for replay |
+| `traces/<harness>/` | Append-only Reporter event streams |
+| `usage.jsonl` | Token usage and cost metrics |
 
-→ Why each guarantee holds, in detail: [**docs.telosai.pro**](https://docs.telosai.pro).
+These files can contain prompts, source code, tool results, and credentials present in model requests. Protect the directory as sensitive data. TELOS does not upload it to a TELOS service, but your configured model provider still receives the requests needed for inference.
 
-## ⬢ &nbsp;Learn more
+To migrate, stop the gateway, securely copy the complete `~/.telos/` directory, and start TELOS on the destination. No hosted control plane or proprietary database is required.
 
-| Topic | Where |
+## Trace model
+
+TELOS uses a small hierarchy that matches how agent work actually happens:
+
+```text
+TaskType  →  TaskRun  →  Attempt  →  Event
+```
+
+- **TaskType**: a reusable class of work, such as `code defect repair`.
+- **TaskRun**: one concrete task with its inputs and acceptance criteria.
+- **Attempt**: one agent execution under a specific prompt/tool/workflow/model configuration.
+- **Event**: an ordered fact observed during the attempt.
+
+Hook adapters can report lifecycle events through the CLI without handling Reporter credentials directly:
+
+```bash
+telos report \
+  --harness codex \
+  --session task-123 \
+  --event tool.finished \
+  --data '{"tool":"pytest","exit_code":1}'
+```
+
+The store assigns monotonic sequence numbers, deduplicates `event_id`, and writes one local JSONL stream per harness session.
+
+## The self-evolution contract
+
+The target loop is deliberately offline and evidence-gated:
+
+```text
+production trace
+  → outcome label and failure attribution
+  → frozen regression case
+  → one-axis candidate revision
+  → paired offline evaluation
+  → recommendation
+  → human promotion
+```
+
+A candidate may change a prompt, tool policy, workflow, or model route—but not all of them at once. Private rubrics remain outside the candidate-generation context, and passing candidates are recommended rather than silently deployed.
+
+The full decision, including alternatives and phase boundaries, lives in [ADR-0001: Local Trace and task-type evolution](docs/adr/0001-local-trace-and-task-type-evolution.md).
+
+## Context and cost optimization
+
+TELOS still canonicalizes agent context into a stable IR and arranges it for provider KV-cache reuse. On the existing six-turn OpenClaw measurement, cost fell from `$0.3623` to `$0.0281` (`−92.3%`); SWE-bench Verified measured `−52.8%` new input and `−40.5%` end-to-end cost without a statistically significant resolved-rate regression.
+
+See the [protocol](https://docs.telosai.pro/en/concepts/protocol), [benchmark methodology](https://docs.telosai.pro/en/benchmark/swebench), and [support matrix](https://docs.telosai.pro/en/reference/support-matrix).
+
+## Documentation
+
+| Topic | Reference |
 |---|---|
-| **The protocol** — three-color bands (PIN/FOLD/DROP) and monotonic append | [concepts/protocol](https://docs.telosai.pro/en/concepts/protocol) · [concepts/bands](https://docs.telosai.pro/en/concepts/bands) |
-| **Support matrix** — harnesses, frontier models, inference frameworks, cc-switch | [reference/support-matrix](https://docs.telosai.pro/en/reference/support-matrix) |
-| **SWE-bench Verified A/B** — pre-registered design, statistics, full report | [benchmark/swebench](https://docs.telosai.pro/en/benchmark/swebench) |
-| **Architecture & integration paths** | [concepts/architecture](https://docs.telosai.pro/en/concepts/architecture) · [guides/integration-paths](https://docs.telosai.pro/en/guides/integration-paths) |
-| **CLI reference & changelog** | [reference/cli](https://docs.telosai.pro/en/reference/cli) · [CHANGELOG.md](CHANGELOG.md) |
+| Local Trace and evolution decision | [ADR-0001](docs/adr/0001-local-trace-and-task-type-evolution.md) |
+| Current implementation architecture | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Installation and integration | [docs.telosai.pro](https://docs.telosai.pro/en/start/installation) |
+| Release history | [CHANGELOG.md](CHANGELOG.md) |
 
-**TELOS is open source. Run it on your own workflow — see whether that 92% is real, or just another "X× tokens" claim.**
+## Contributing and license
 
-<a id="citation"></a>
+Issues and pull requests are welcome. Run the test suite with:
+
+```bash
+pytest
+```
+
+TELOS core is licensed under [Apache 2.0](LICENSE).
 
 ## Citation
-
-Core contributors: Zheng Wang, Shenzhi Wang, HongTao Zhong, Shiji Song, Gao Huang
 
 ```bibtex
 @misc{wang2026telos-agent,
@@ -119,10 +197,8 @@ Core contributors: Zheng Wang, Shenzhi Wang, HongTao Zhong, Shiji Song, Gao Huan
 }
 ```
 
----
-
 <div align="center">
-<a href="https://github.com/learningCatHD/telos-sdk"><img src="https://img.shields.io/badge/⭐%20Star%20on%20GitHub-learningCatHD%2Ftelos--sdk-1F4A50?style=for-the-badge&logo=github&logoColor=white" alt="Star on GitHub"/></a>
 
-<sub>📖 Full documentation at <a href="https://docs.telosai.pro">docs.telosai.pro</a></sub>
+**Keep the context. Learn from the work. Improve the next attempt.**
+
 </div>

@@ -21,7 +21,13 @@ import shutil
 import subprocess
 import sys
 
-from telos.config import config_path, load_config, telos_home
+from telos.config import (
+    config_path,
+    disable_harness_trace,
+    enable_harness_trace,
+    load_config,
+    telos_home,
+)
 from telos.harnesses import HARNESS_NAMES, detect_installed
 from telos.init import INSTALLERS
 from telos.init.base import InstallResult
@@ -200,6 +206,10 @@ def main(argv: list[str] | None = None) -> int:
         rc |= sub_rc
         if result is not None and telos_config_path in result.changed_files:
             config_changed = True
+        if result is not None and not args.status:
+            _, trace_changed = enable_harness_trace(name)
+            config_changed |= trace_changed
+            print(f"  ▸ local Trace capture enabled for {name}")
 
     # ---- Start the gateway after a successful install ----
     if not args.status and not args.no_gateway and rc == 0:
@@ -332,6 +342,9 @@ def uninstall_main(argv: list[str] | None = None) -> int:
 
     for name in skipped:
         print(f"  ▸ skip {name}: not connected to telos (no injection found)")
+        _, trace_changed = disable_harness_trace(name)
+        if trace_changed:
+            print(f"  ▸ local Trace disabled for {name}; history retained")
 
     if not targets and not args.purge:
         if args.harness:
@@ -348,6 +361,10 @@ def uninstall_main(argv: list[str] | None = None) -> int:
         rc |= sub_rc
         if result is not None and result.changed_files:
             reverted_any = True
+        if result is not None:
+            _, trace_changed = disable_harness_trace(name)
+            if trace_changed:
+                print(f"  ▸ local Trace disabled for {name}; history retained")
 
     if reverted_any:
         print()

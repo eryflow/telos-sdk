@@ -13,6 +13,8 @@ Subcommands:
 - ``telos mode``          switch the optimization mode (hot-updates the running gateway)
 - ``telos alias``         set the harness the bare ``telos`` enters by default
 - ``telos replay``        replay a recorded session across multiple modes for comparison
+- ``telos evolve``        configure offline self-evolution for a task type
+- ``telos report``        append a Harness lifecycle event (used by hooks)
 - ``telos proxy``         (hidden alias) run the gateway blocking in the foreground, equivalent to the old telos proxy
 """
 
@@ -75,6 +77,12 @@ def main(argv: list[str] | None = None) -> int:
     if subcommand == "replay":
         from telos.replay.__main__ import main as replay_main
         return replay_main(rest)
+    if subcommand == "evolve":
+        from telos.evolve import main as evolve_main
+        return evolve_main(rest)
+    if subcommand == "report":
+        from telos.reporter import main as reporter_main
+        return reporter_main(rest)
     if subcommand == "showcase":
         from telos.scripts.showcase import main as showcase_main
         return showcase_main(rest)
@@ -747,6 +755,8 @@ def _print_usage() -> None:
         "  mode        switch the optimization mode (none|telos|rtk|both), hot-updates the running gateway\n"
         "  alias       set the harness the bare telos enters by default\n"
         "  replay      replay a recorded session across multiple modes for a controlled A/B comparison\n"
+        "  evolve      configure local offline self-evolution for a task type\n"
+        "  report      append a Harness lifecycle event (for hook adapters)\n"
         "  showcase    offline narrated demo + interactive playground (--interactive / --cast)\n"
         "\n"
         "options:\n"
@@ -759,6 +769,7 @@ def _print_usage() -> None:
         "  telos gateway start --port 7171\n"
         "  telos mode both\n"
         "  telos alias claude-code\n"
+        "  telos evolve --task 'code defect repair'\n"
         "  telos                       # enter the favorite harness\n"
         "  telos dashboard\n"
         "  telos dashboard restart\n"

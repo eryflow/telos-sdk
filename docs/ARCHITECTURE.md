@@ -6,6 +6,7 @@
 >
 > - Want to get started → [playbook.md](playbook.md), [User-guide.md](User-guide.md)
 > - Want the protocol spec → [2026-05-06-telos-protocol.md](2026-05-06-telos-protocol.md)
+> - Want the local Trace / self-evolution decision → [ADR-0001](adr/0001-local-trace-and-task-type-evolution.md)
 > - Want the change history → [../CHANGELOG.md](../CHANGELOG.md)
 >
 > Last updated: 2026-05-18
