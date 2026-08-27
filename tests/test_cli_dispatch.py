@@ -7,7 +7,6 @@ import io
 import json
 import os
 import tempfile
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from telos import cli
@@ -92,24 +91,15 @@ def test_evolve_task_round_trip() -> None:
     assert policy["promotion"] == "manual"
 
 
-def test_report_uses_registered_token_without_printing_it() -> None:
-    _iso_home()
-    import telos.config as cfgmod
-    cfg, _ = cfgmod.enable_harness_trace("codex")
-    token = cfg.trace_harnesses["codex"]["reporter_token"]
-    state = SimpleNamespace(host="127.0.0.1", port=7171)
-    response = {"accepted": [{"event_id": "event-1", "seq": 1, "created": True}]}
-    with patch("telos.gateway.daemon.read_state", return_value=state), patch(
-        "telos.gateway.control.post_reporter_events", return_value=response,
-    ) as post:
-        rc, out = _run([
-            "report", "--harness", "codex", "--session", "session-1",
-            "--event", "attempt.started", "--event-id", "event-1",
-        ])
-    assert rc == 0
-    assert "seq=1" in out
-    assert token not in out
-    assert post.call_args.args[2]["reporter_token"] == token
+def test_trace_hook_dispatches_only_codex() -> None:
+    with patch("telos.codex_tracing.main", return_value=7) as hook:
+        rc, _ = _run(["trace-hook", "codex"])
+    assert rc == 7
+    hook.assert_called_once_with([])
+
+    rc, out = _run(["trace-hook", "deepseek-harness"])
+    assert rc == 2
+    assert "usage: telos trace-hook codex" in out
 
 
 def test_dashboard_rejects_bad_verb() -> None:

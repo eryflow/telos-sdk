@@ -28,16 +28,15 @@ def test_record_and_load_roundtrip() -> None:
     print("✓ test_record_and_load_roundtrip")
 
 
-def test_load_session_sorts_by_call_index() -> None:
-    """Out-of-order writes should still be read back in ascending call_index order."""
+def test_load_session_preserves_append_order_across_gateway_restarts() -> None:
+    """A reset process-local call_index must not reorder a persisted session."""
     with tempfile.TemporaryDirectory() as td:
         cd = Path(td)
-        record_call(cd, "s", 3, _sample_request("c"))
-        record_call(cd, "s", 1, _sample_request("a"))
-        record_call(cd, "s", 2, _sample_request("b"))
+        record_call(cd, "s", 98, _sample_request("before restart"))
+        record_call(cd, "s", 1, _sample_request("after restart"))
         turns = load_session(cd, "s")
-        assert [t["call_index"] for t in turns] == [1, 2, 3]
-    print("✓ test_load_session_sorts_by_call_index")
+        assert [t["call_index"] for t in turns] == [98, 1]
+    print("✓ test_load_session_preserves_append_order_across_gateway_restarts")
 
 
 def test_list_sessions() -> None:
@@ -137,7 +136,7 @@ def test_load_by_inner_display_id() -> None:
 
 def main() -> None:
     test_record_and_load_roundtrip()
-    test_load_session_sorts_by_call_index()
+    test_load_session_preserves_append_order_across_gateway_restarts()
     test_list_sessions()
     test_load_by_inner_id_when_filename_differs()
     test_load_missing_session_raises()

@@ -155,7 +155,11 @@ def list_sessions(corpus_dir: Path) -> list[CorpusSessionInfo]:
 
 
 def load_session(corpus_dir: Path, session_id: str) -> list[dict[str, Any]]:
-    """Read all turns of a session, in ascending ``call_index`` order.
+    """Read all turns of a session in append order.
+
+    JSONL order is the recording order. ``call_index`` is process-local and
+    restarts from one when the gateway restarts, so sorting by it can corrupt a
+    long-lived session's chronology.
 
     ``session_id`` resolves flexibly — any of these work:
 
@@ -169,9 +173,7 @@ def load_session(corpus_dir: Path, session_id: str) -> list[dict[str, Any]]:
     # 1. fast path: the file named directly after the (sanitized) id.
     direct = corpus_dir / f"{_safe_name(session_id)}.jsonl"
     if direct.exists():
-        recs = _read_lines(direct)
-        recs.sort(key=lambda r: int(r.get("call_index") or 0))
-        return recs
+        return _read_lines(direct)
 
     # 2. scan: match by filename stem, full stored id, or inner display id.
     if corpus_dir.exists():
@@ -181,9 +183,7 @@ def load_session(corpus_dir: Path, session_id: str) -> list[dict[str, Any]]:
             if (path.stem == session_id
                     or stored == session_id
                     or display_session(stored) == session_id):
-                recs = _read_lines(path)
-                recs.sort(key=lambda r: int(r.get("call_index") or 0))
-                return recs
+                return _read_lines(path)
 
     raise FileNotFoundError(
         f"session {session_id!r} not found in corpus (directory {corpus_dir})")

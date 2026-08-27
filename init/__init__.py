@@ -11,6 +11,8 @@ One installer per harness:
 - ``hermes``: patches the top-level ``model.base_url`` in
   ``~/.hermes/config.yaml`` (analogous pattern).
 - ``codex``: patches ``~/.codex/config.toml`` with a TELOS custom provider.
+- ``deepseek-harness``: mounts the TELOS native session-telemetry backend in a
+  named DSH profile patch layer.
 - ``generic``: prints a set of shell ``export`` commands the user can add
   to their rc file.
 """
@@ -22,6 +24,7 @@ from typing import Callable
 from telos.init.base import AgentInstaller, InstallResult
 from telos.init.claude_code import ClaudeCodeInstaller
 from telos.init.codex import CodexInstaller
+from telos.init.deepseek_harness import DeepSeekHarnessInstaller
 from telos.init.generic import GenericInstaller
 from telos.init.hermes import HermesInstaller
 from telos.init.openclaw import OpenClawInstaller
@@ -32,6 +35,7 @@ InstallerFactory = Callable[..., AgentInstaller]
 INSTALLERS: dict[str, InstallerFactory] = {
     "claude-code": ClaudeCodeInstaller,
     "codex": CodexInstaller,
+    "deepseek-harness": DeepSeekHarnessInstaller,
     "openclaw": OpenClawInstaller,
     "hermes": HermesInstaller,
     "generic": GenericInstaller,

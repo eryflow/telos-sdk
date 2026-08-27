@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 
 DEFAULT_GATEWAY_HOST = "127.0.0.1"
 DEFAULT_GATEWAY_PORT = 7171
@@ -238,6 +238,15 @@ def _parse_policy_map(raw: Any) -> dict[str, dict[str, Any]]:
     }
 
 
+def _parse_trace_policies(raw: Any) -> dict[str, dict[str, Any]]:
+    policies = _parse_policy_map(raw)
+    for policy in policies.values():
+        legacy = policy.pop("reporter_token", None)
+        if not policy.get("tracing_token") and isinstance(legacy, str) and legacy:
+            policy["tracing_token"] = legacy
+    return policies
+
+
 def load_config() -> TelosConfig:
     """Read ``~/.telos/config.json``; returns all defaults if missing."""
     path = config_path()
@@ -274,7 +283,7 @@ def load_config() -> TelosConfig:
         favorite_harness=str(fav) if fav else None,
         harness_executables=harness_executables,
         upstreams=upstreams,
-        trace_harnesses=_parse_policy_map(data.get("trace_harnesses")),
+        trace_harnesses=_parse_trace_policies(data.get("trace_harnesses")),
         evolution_tasks=_parse_policy_map(data.get("evolution_tasks")),
         _extra=extra,
     )
@@ -323,11 +332,15 @@ def update_config(**fields: Any) -> TelosConfig:
     return cfg
 
 
-def enable_harness_trace(harness: str) -> tuple[TelosConfig, bool]:
+def enable_harness_trace(
+    harness: str,
+    *,
+    model_span_source: str | None = None,
+) -> tuple[TelosConfig, bool]:
     """Register one Harness for full local Trace capture, idempotently.
 
-    Returns ``(config, changed)``. Re-running init preserves the Reporter token
-    so installed hooks do not lose access when the gateway is restarted.
+    Re-running init preserves the ingress token. ``model_span_source`` selects
+    exactly one owner for LLM spans, preventing adapter/Gateway double-counting.
     """
     name = harness.strip()
     if not name:
@@ -337,8 +350,12 @@ def enable_harness_trace(harness: str) -> tuple[TelosConfig, bool]:
     updated = dict(current)
     updated["enabled"] = True
     updated["capture"] = "full"
-    if not isinstance(updated.get("reporter_token"), str) or not updated["reporter_token"]:
-        updated["reporter_token"] = secrets.token_urlsafe(24)
+    if model_span_source is not None:
+        if model_span_source not in ("adapter", "gateway"):
+            raise ValueError("model_span_source must be 'adapter' or 'gateway'")
+        updated["model_span_source"] = model_span_source
+    if not isinstance(updated.get("tracing_token"), str) or not updated["tracing_token"]:
+        updated["tracing_token"] = secrets.token_urlsafe(24)
     if updated == current:
         return cfg, False
     cfg.trace_harnesses[name] = updated
@@ -347,7 +364,7 @@ def enable_harness_trace(harness: str) -> tuple[TelosConfig, bool]:
 
 
 def disable_harness_trace(harness: str) -> tuple[TelosConfig, bool]:
-    """Disable future Reporter events for a Harness without deleting history."""
+    """Disable future tracing writes for a Harness without deleting history."""
     name = harness.strip()
     cfg = load_config()
     current = cfg.trace_harnesses.get(name)

@@ -79,7 +79,11 @@ packages = [
     "telos.init",
     "telos.output_filter",
     "telos.replay",
+    "telos.tracing",
 ]
 
 [tool.setuptools.package-dir]
 telos = "."
+
+[tool.setuptools.package-data]
+"telos.init" = ["assets/*.mjs"]

@@ -37,7 +37,7 @@ class HarnessSpec:
     env_var: str              # the name of the environment variable pointing at the gateway
 
 
-# 4 preset harnesses. The executable names are reasonable default guesses —
+# Preset harnesses. The executable names are reasonable default guesses —
 # users can override them in the harness_executables of ~/.telos/config.json.
 HARNESS_SPECS: dict[str, HarnessSpec] = {
     "claude-code": HarnessSpec(
@@ -53,6 +53,13 @@ HARNESS_SPECS: dict[str, HarnessSpec] = {
         default_executable="codex",
         injection=_INJECTION_ENV,
         env_var="OPENAI_BASE_URL",
+    ),
+    "deepseek-harness": HarnessSpec(
+        name="deepseek-harness",
+        display_name="DeepSeek Harness",
+        default_executable="dsh",
+        injection=_INJECTION_ENV,
+        env_var="TELOS_GATEWAY_URL",
     ),
     "openclaw": HarnessSpec(
         name="openclaw",

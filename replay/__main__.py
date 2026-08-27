@@ -51,6 +51,29 @@ def _print_sessions(corpus_dir: Path) -> int:
     return 0
 
 
+def _show_session(session_id: str, turns: list[dict]) -> int:
+    """Print a bounded, read-only view of any recorded wire protocol."""
+    print(f"session {session_id} —— {len(turns)} recorded calls:\n")
+    for seq, turn in enumerate(turns, 1):
+        request = turn.get("request") or {}
+        payload = request.get("messages", request.get("input"))
+        protocol = "openai-responses" if "input" in request else "messages"
+        items = len(payload) if isinstance(payload, list) else int(payload is not None)
+        preview = json.dumps(payload, ensure_ascii=False, default=str)
+        preview = " ".join(preview.split())
+        if len(preview) > 160:
+            preview = preview[:157] + "..."
+        recorded = datetime.fromtimestamp(float(turn.get("ts") or 0)).strftime(
+            "%Y-%m-%d %H:%M:%S") if turn.get("ts") else "—"
+        print(
+            f"  {seq:>3}. call_index={turn.get('call_index', '—')} · {recorded}"
+            f" · {request.get('model', '—')} · {protocol}"
+            f" · {items} input item(s) · {len(request.get('tools') or [])} tools"
+        )
+        print(f"       {preview or '—'}")
+    return 0
+
+
 def _append_records(usage_log: Path, results: list[ReplayResult]) -> int:
     usage_log.parent.mkdir(parents=True, exist_ok=True)
     n = 0
@@ -138,6 +161,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="list the sessions in the corpus and exit")
     ap.add_argument("--session", default=None,
                     help="the session id to replay (see --list)")
+    ap.add_argument("--show", action="store_true",
+                    help="inspect a session without sending model requests")
     ap.add_argument("--modes", default="none,telos,rtk,both",
                     help="comma-separated list of modes (default none,telos,rtk,both)")
     ap.add_argument("--usage-log", type=Path, default=_DEFAULT_USAGE_LOG,
@@ -172,6 +197,17 @@ def main(argv: list[str] | None = None) -> int:
     if not turns:
         print(f"session {args.session} has no replayable turns", file=sys.stderr)
         return 1
+
+    if args.show:
+        return _show_session(args.session, turns)
+
+    if any("input" in (turn.get("request") or {}) for turn in turns):
+        print(
+            "OpenAI Responses sessions cannot be re-executed yet; "
+            "use --show for a read-only view",
+            file=sys.stderr,
+        )
+        return 2
 
     if not args.api_key:
         print("missing API key: set ANTHROPIC_API_KEY or pass --api-key", file=sys.stderr)

@@ -6,7 +6,7 @@
 
 **Own long-running agent context locally, replay real work, and turn production traces into offline improvements.**
 
-<sub>🔒 Local-first &nbsp;·&nbsp; 🔌 Harness-agnostic &nbsp;·&nbsp; ⏪ Replayable &nbsp;·&nbsp; 🧬 Built for continuous evolution</sub>
+<sub>💰 Up to 90% token-bill savings &nbsp;·&nbsp; 🔒 Local-first &nbsp;·&nbsp; 🔌 Harness-agnostic &nbsp;·&nbsp; ⏪ Replayable &nbsp;·&nbsp; 🧬 Built for continuous evolution</sub>
 
 <br/>
 
@@ -15,7 +15,7 @@
 [![Status](https://img.shields.io/badge/status-Beta-d8851f?style=flat-square)](CHANGELOG.md)
 [![Version](https://img.shields.io/badge/version-0.1.8-4FB3BF?style=flat-square)](CHANGELOG.md)
 
-[**Quickstart**](#quickstart) &nbsp;·&nbsp; [**How it works**](#how-it-works) &nbsp;·&nbsp; [**What ships today**](#what-ships-today) &nbsp;·&nbsp; [**Design**](docs/adr/0001-local-trace-and-task-type-evolution.md)
+[**Quickstart**](#quickstart) &nbsp;·&nbsp; [**How it works**](#how-it-works) &nbsp;·&nbsp; [**Savings**](#cost-optimization) &nbsp;·&nbsp; [**What ships today**](#what-ships-today) &nbsp;·&nbsp; [**Design**](docs/adr/0002-opik-style-agent-tracing-platform.md)
 
 **📖 English** &nbsp;|&nbsp; [🇨🇳 中文](README.zh-CN.md)
 
@@ -42,10 +42,12 @@ Prompt-cache optimization remains part of TELOS. It is now one runtime primitive
 
 ```mermaid
 flowchart LR
-    H["Agent harness<br/>Codex · Claude Code · OpenClaw · Hermes"] --> G["Local TELOS gateway"]
+    H["Agent harness<br/>Codex · DeepSeek Harness · others"] --> G["Local TELOS gateway"]
     G --> M["Your model provider"]
     G --> C["Local request corpus"]
-    H -. "Reporter events" .-> T["Local lifecycle trace"]
+    H -->|"native hooks / telemetry"| T["Thread → Trace → Span"]
+    G -->|"model spans"| T
+    T --> D[("Local SQLite")]
     C --> R["Replay and regression cases"]
     T --> R
     R --> E["Offline evaluation"]
@@ -56,7 +58,7 @@ flowchart LR
 TELOS keeps two complementary records:
 
 1. The **gateway corpus** stores model requests for deterministic replay and cost comparison.
-2. The **Harness Reporter trace** stores lifecycle events the model API cannot see: attempts, tool results, approvals, workspace changes, artifacts, feedback, and final outcomes.
+2. The **tracing database** stores Harness and model lifecycles as queryable `Thread → Trace → Span` trees, including tools, subagents, approvals, usage, TTFT, and errors.
 
 They are correlated by `session_id` and become one task history without forcing existing replay data into a new format.
 
@@ -68,9 +70,10 @@ They are correlated by `session_id` and become one task history without forcing 
 |---|---|
 | Inject the local gateway into Codex, Claude Code, OpenClaw, and Hermes | **Available** |
 | Record model-request corpus locally and replay sessions across modes | **Available** |
-| Authenticated Reporter endpoint and append-only local event store | **Available** |
+| SQLite Trace/Span store, authenticated batch ingest, and local Trace Explorer | **Available** |
+| Native Codex hooks and DeepSeek Harness telemetry adapters | **Available** |
 | `telos evolve --task` task-type policy with offline evaluation and manual promotion settings | **Available** |
-| Native Reporter hooks that capture every tool/approval/workspace event from each harness | **Next** |
+| Additional native Harness tracing adapters | **Next** |
 | Automatic outcome labeling, failure attribution, regression generation, and candidate evaluation | **Next** |
 | SFT/RL dataset export | **Planned** |
 
@@ -109,9 +112,9 @@ TELOS persists its state under `~/.telos/`:
 
 | Path | Contents |
 |---|---|
-| `config.json` | Gateway, harness Trace, and evolution policies; includes local Reporter tokens |
+| `config.json` | Gateway, Harness Trace, and evolution policies; includes per-Harness tracing tokens |
 | `corpus/` | Raw model requests used for replay |
-| `traces/<harness>/` | Append-only Reporter event streams |
+| `telos.db` | SQLite projects, threads, traces, spans, and feedback |
 | `usage.jsonl` | Token usage and cost metrics |
 
 These files can contain prompts, source code, tool results, and credentials present in model requests. Protect the directory as sensitive data. TELOS does not upload it to a TELOS service, but your configured model provider still receives the requests needed for inference.
@@ -120,28 +123,26 @@ To migrate, stop the gateway, securely copy the complete `~/.telos/` directory, 
 
 ## Trace model
 
-TELOS uses a small hierarchy that matches how agent work actually happens:
+TELOS uses the same compact hierarchy across Harnesses:
 
 ```text
-TaskType  →  TaskRun  →  Attempt  →  Event
+Project  →  Thread  →  Trace  →  Span
 ```
 
-- **TaskType**: a reusable class of work, such as `code defect repair`.
-- **TaskRun**: one concrete task with its inputs and acceptance criteria.
-- **Attempt**: one agent execution under a specific prompt/tool/workflow/model configuration.
-- **Event**: an ordered fact observed during the attempt.
+- **Project**: a local logical grouping.
+- **Thread**: one Harness session or conversation.
+- **Trace**: one user turn or agent attempt.
+- **Span**: one agent, LLM, tool, approval, or compaction operation.
 
-Hook adapters can report lifecycle events through the CLI without handling Reporter credentials directly:
+Install the adapters, then inspect the unified tree locally:
 
 ```bash
-telos report \
-  --harness codex \
-  --session task-123 \
-  --event tool.finished \
-  --data '{"tool":"pytest","exit_code":1}'
+telos init --harness codex
+telos init --harness deepseek-harness --replace-telemetry-backend
+# http://127.0.0.1:7171/__telos/traces
 ```
 
-The store assigns monotonic sequence numbers, deduplicates `event_id`, and writes one local JSONL stream per harness session.
+Adapters generate stable IDs and submit idempotent entity snapshots; the Gateway is the only SQLite writer.
 
 ## The self-evolution contract
 
@@ -159,11 +160,22 @@ production trace
 
 A candidate may change a prompt, tool policy, workflow, or model route—but not all of them at once. Private rubrics remain outside the candidate-generation context, and passing candidates are recommended rather than silently deployed.
 
-The full decision, including alternatives and phase boundaries, lives in [ADR-0001: Local Trace and task-type evolution](docs/adr/0001-local-trace-and-task-type-evolution.md).
+The tracing decision, including alternatives and phase boundaries, lives in [ADR-0002: Trace/Span agent tracing platform](docs/adr/0002-opik-style-agent-tracing-platform.md).
+
+<a id="cost-optimization"></a>
 
 ## Context and cost optimization
 
-TELOS still canonicalizes agent context into a stable IR and arranges it for provider KV-cache reuse. On the existing six-turn OpenClaw measurement, cost fell from `$0.3623` to `$0.0281` (`−92.3%`); SWE-bench Verified measured `−52.8%` new input and `−40.5%` end-to-end cost without a statistically significant resolved-rate regression.
+Prompt-cache optimization remains part of TELOS: no prompt rewrite or compression is required. TELOS canonicalizes agent context into a stable IR and arranges it for provider KV-cache reuse.
+
+In an existing real six-turn OpenClaw measurement:
+
+| Mode | Raw input tokens | Cache read | Six-turn cost |
+|---|---:|---:|---:|
+| Passthrough | 24,151 | 0 | **$0.3623** |
+| TELOS | 0 | 18,701 | **$0.0281 (−92.3%)** |
+
+SWE-bench Verified measured `−52.8%` new input and `−40.5%` end-to-end cost. The A/B resolved-rate comparison found no statistically significant regression (McNemar `p = 0.66`). Savings vary with workload and provider cache pricing; `telos dashboard` reports the absolute cost for your own traffic.
 
 See the [protocol](https://docs.telosai.pro/en/concepts/protocol), [benchmark methodology](https://docs.telosai.pro/en/benchmark/swebench), and [support matrix](https://docs.telosai.pro/en/reference/support-matrix).
 

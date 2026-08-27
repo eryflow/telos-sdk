@@ -56,7 +56,7 @@ def _looks_like_telos_route(url: str) -> bool:
 
 
 def _looks_like_telos_pool_route(url: str) -> bool:
-    return bool(_TELOS_POOL_ROUTE_RE.match(url))
+    return _looks_like_telos_route(url) or bool(_TELOS_POOL_ROUTE_RE.match(url))
 
 
 def _default_config_path() -> Path:
@@ -230,13 +230,17 @@ class HermesInstaller(AgentInstaller):
         return f"{self.proxy_url.rstrip('/')}/_h/hermes/upstreams/{slug}"
 
     def _telos_pool_url(self, slug: str) -> str:
-        """Credential pool base_url with /v1 suffix.
+        """Credential-pool URL for the provider's wire protocol.
 
         Hermes's OpenAI SDK appends /chat/completions to base_url, so the pool
         entry needs the version segment so the assembled path is correct:
           http://…/upstreams/<slug>/v1  +  /chat/completions
           → http://…/upstreams/<slug>/v1/chat/completions  (tail for telos)
         """
+        # ChatGPT's Codex Responses endpoint is ``.../codex/responses`` (no
+        # ``/v1``). Other OpenAI-compatible pools use ``/v1``.
+        if slug == "openai-codex":
+            return self._telos_route_url(slug)
         return f"{self._telos_route_url(slug)}/v1"
 
     def _patch_credential_pool(
@@ -267,8 +271,8 @@ class HermesInstaller(AgentInstaller):
         route_url = self._telos_pool_url(provider_id)
         # Recover originals from prior state so re-install doesn't lock in
         # an intermediate telos URL as the "original".
-        existing_patches: dict[str, str] = {
-            p["id"]: p["previous_base_url"]
+        existing_patches: dict[str, dict[str, Any]] = {
+            p["id"]: p
             for p in state_record.get("auth_pool_patches", [])
             if isinstance(p, dict) and "id" in p and "previous_base_url" in p
         }
@@ -280,22 +284,60 @@ class HermesInstaller(AgentInstaller):
                 continue
             entry_id = str(entry.get("id", ""))
             old_url = str(entry.get("base_url") or "")
+            old_patch = existing_patches.get(entry_id, {})
 
             if old_url == route_url:
                 # Already patched — preserve state record.
-                prev = existing_patches.get(entry_id, old_url)
-                new_patches.append({"id": entry_id, "previous_base_url": prev})
+                prev = old_patch.get("previous_base_url", old_url)
+                patch = {"id": entry_id, "previous_base_url": prev}
+                if old_patch.get("previous_source"):
+                    patch["previous_source"] = old_patch["previous_source"]
+                new_patches.append(patch)
                 continue
 
             is_stale = _looks_like_telos_pool_route(old_url)
-            prev_url = existing_patches.get(entry_id) or (None if is_stale else old_url)
+            prev_url = old_patch.get("previous_base_url") or (None if is_stale else old_url)
             if prev_url is None:
                 # Stale telos URL with no state record — skip safely.
                 continue
 
-            new_patches.append({"id": entry_id, "previous_base_url": prev_url})
+            patch = {"id": entry_id, "previous_base_url": prev_url}
+            if old_patch.get("previous_source"):
+                patch["previous_source"] = old_patch["previous_source"]
+            new_patches.append(patch)
             entry["base_url"] = route_url
             changed = True
+
+        # Hermes 0.20.x reconstructs the singleton Codex ``device_code`` row
+        # with a hard-coded ChatGPT URL on every load. Its supported manual
+        # device-code source uses the same OAuth refresh path but is not
+        # overwritten, so preserve that row as a manual alias and suppress
+        # only the automatic duplicate while telos owns the route.
+        if provider_id == "openai-codex":
+            by_id = {p["id"]: p for p in new_patches}
+            for entry in entries:
+                if not isinstance(entry, dict) or entry.get("source") != "device_code":
+                    continue
+                entry_id = str(entry.get("id", ""))
+                patch = by_id.get(entry_id)
+                if patch is not None:
+                    patch["previous_source"] = "device_code"
+                entry["source"] = "manual:device_code"
+                changed = True
+
+            suppressed = auth_data.get("suppressed_sources")
+            if not isinstance(suppressed, dict):
+                suppressed = {}
+                auth_data["suppressed_sources"] = suppressed
+            raw_sources = suppressed.get(provider_id)
+            sources = (list(raw_sources) if isinstance(raw_sources, list)
+                       else list(raw_sources) if isinstance(raw_sources, dict)
+                       else [])
+            if "device_code" not in sources:
+                sources.append("device_code")
+                suppressed[provider_id] = sources
+                state_record["auth_pool_suppression_added"] = True
+                changed = True
 
         if new_patches:
             state_record["auth_pool_patches"] = new_patches
@@ -328,8 +370,8 @@ class HermesInstaller(AgentInstaller):
             return False
 
         route_url = self._telos_pool_url(provider_id)
-        prev_by_id: dict[str, str] = {
-            p["id"]: p["previous_base_url"]
+        prev_by_id: dict[str, dict[str, Any]] = {
+            p["id"]: p
             for p in patches
             if isinstance(p, dict) and "id" in p
         }
@@ -338,13 +380,53 @@ class HermesInstaller(AgentInstaller):
             if not isinstance(entry, dict):
                 continue
             entry_id = str(entry.get("id", ""))
-            if entry.get("base_url") == route_url and entry_id in prev_by_id:
-                entry["base_url"] = prev_by_id[entry_id]
+            patch = prev_by_id.get(entry_id)
+            if patch is None:
+                continue
+            if entry.get("base_url") == route_url:
+                entry["base_url"] = patch["previous_base_url"]
                 changed = True
+            previous_source = patch.get("previous_source")
+            if previous_source and entry.get("source") == "manual:device_code":
+                entry["source"] = previous_source
+                changed = True
+
+        if state_record.get("auth_pool_suppression_added"):
+            suppressed = auth_data.get("suppressed_sources")
+            if isinstance(suppressed, dict):
+                raw_sources = suppressed.get(provider_id)
+                if isinstance(raw_sources, list) and "device_code" in raw_sources:
+                    raw_sources.remove("device_code")
+                    if not raw_sources:
+                        suppressed.pop(provider_id, None)
+                    if not suppressed:
+                        auth_data.pop("suppressed_sources", None)
+                    changed = True
 
         if changed:
             _atomic_write_json(auth_path, auth_data)
         return changed
+
+    def _credential_pool_is_routed(self, provider_id: str) -> bool:
+        if provider_id != "openai-codex":
+            return True
+        try:
+            auth_data = json.loads(
+                self._auth_json_path().read_text(encoding="utf-8")
+            )
+        except (json.JSONDecodeError, OSError):
+            return False
+        pool = auth_data.get("credential_pool")
+        entries = pool.get(provider_id) if isinstance(pool, dict) else None
+        suppressed = auth_data.get("suppressed_sources")
+        sources = suppressed.get(provider_id, []) if isinstance(suppressed, dict) else []
+        route_url = self._telos_pool_url(provider_id)
+        return bool(entries) and "device_code" in sources and all(
+            isinstance(entry, dict)
+            and entry.get("source") != "device_code"
+            and entry.get("base_url") == route_url
+            for entry in entries
+        )
 
     def _ensure_upstream_slug(
         self, telos_cfg: TelosConfig, slug: str, url: str, api_mode: str,
@@ -634,10 +716,17 @@ class HermesInstaller(AgentInstaller):
             route_url = self._telos_route_url(info.provider_id)
             loc = ("model" if k == _PRIMARY_KEY else f"providers.{k}.model")
             if info.base_url == route_url:
-                any_routed = True
+                pool_routed = self._credential_pool_is_routed(info.provider_id)
+                any_routed = any_routed or pool_routed
                 prev = state_by_key.get(k, {}).get("previous_base_url")
                 suffix = f" (restores to {prev!r} on uninstall)" if prev else ""
-                r.notes.append(f"  ✓ {loc}: routed → {route_url}{suffix}")
+                if pool_routed:
+                    r.notes.append(f"  ✓ {loc}: routed → {route_url}{suffix}")
+                else:
+                    r.notes.append(
+                        f"  ! {loc}: config is routed but the Codex credential "
+                        f"pool bypasses telos; re-run `telos init --harness hermes`"
+                    )
             elif _looks_like_telos_route(info.base_url):
                 r.notes.append(
                     f"  ! {loc}: stale telos route ({info.base_url}); "

@@ -171,6 +171,12 @@ async def _test_openai_route_non_streaming() -> None:
                 assert resp.status == 200, await resp.text()
                 body = await resp.json()
                 assert body["id"] == "cmpl_test"
+            async with client.get(
+                f"{px_url}/__telos/developer?session=openai-nonstream"
+            ) as resp:
+                trace = await resp.text()
+                assert resp.status == 200
+                assert "Hello there" in trace
 
         # Upstream received the TELOS-processed wire on /v1/chat/completions.
         assert mock.last_path == "/v1/chat/completions"
@@ -568,6 +574,12 @@ async def _test_openai_responses_logs_usage(tmp_log: Path) -> None:
                 assert resp.status == 200
                 async for _ in resp.content.iter_any():
                     pass
+            async with client.get(
+                f"{px_url}/__telos/developer?session=codex-log"
+            ) as resp:
+                trace = await resp.text()
+                assert resp.status == 200
+                assert "gpt-5.5" in trace and "hi" in trace
 
         line = tmp_log.read_text().strip().splitlines()[-1]
         record = json.loads(line)

@@ -36,7 +36,9 @@ from telos.config import (
     load_config,
     revert_upstreams_owned_by,
     save_config,
+    telos_home,
 )
+from telos.codex_tracing import HOOK_EVENTS
 from telos.init.base import AgentInstaller, InstallResult
 
 _ROOT_BEGIN = "# >>> telos managed codex root\n"
@@ -55,6 +57,127 @@ _CODEX_RELAY_SLUG = "codex-upstream"
 _OFFICIAL_OPENAI_HINTS = ("api.openai.com", "chatgpt.com")
 
 _PROVIDER_NAME_RE = re.compile(r'model_provider\s*=\s*"([^"]+)"')
+
+_TRACE_PLUGIN_VERSION = "1"
+_TRACE_PLUGIN_NAME = "telos-tracing"
+_TRACE_HOOK_COMMAND = "telos trace-hook codex"
+_FALLBACK_DESCRIPTION = "TELOS Codex tracing compatibility hooks."
+
+
+def _trace_hook_handler(event: str) -> dict[str, object]:
+    return {
+        "type": "command",
+        "command": _TRACE_HOOK_COMMAND,
+        "timeout": 2,
+        "async": event not in {"UserPromptSubmit", "SessionEnd", "Interrupt"},
+    }
+
+
+def _trace_hook_events() -> dict[str, list[dict[str, object]]]:
+    return {
+        event: [{"hooks": [_trace_hook_handler(event)]}]
+        for event in HOOK_EVENTS
+    }
+
+
+def _trace_plugin_files() -> dict[Path, str]:
+    manifest = {
+        "name": _TRACE_PLUGIN_NAME,
+        "version": _TRACE_PLUGIN_VERSION,
+        "description": "Local TELOS Agent Trace capture for Codex",
+        "hooks": "./hooks/hooks.json",
+    }
+    hook_file = {
+        "description": "TELOS tracing hooks; observation only and fail-open.",
+        "hooks": _trace_hook_events(),
+    }
+    return {
+        Path(".codex-plugin/plugin.json"): json.dumps(
+            manifest, ensure_ascii=False, indent=2
+        ) + "\n",
+        Path("hooks/hooks.json"): json.dumps(
+            hook_file, ensure_ascii=False, indent=2
+        ) + "\n",
+    }
+
+
+def _write_if_changed(path: Path, text: str) -> bool:
+    try:
+        if path.read_text(encoding="utf-8") == text:
+            return False
+    except FileNotFoundError:
+        pass
+    _atomic_write(path, text)
+    return True
+
+
+def _is_telos_hook_handler(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and value.get("type") == "command"
+        and value.get("command") == _TRACE_HOOK_COMMAND
+    )
+
+
+def _merge_trace_hooks(data: object) -> tuple[dict[str, object], bool]:
+    """Add one TELOS handler per event without changing existing handlers."""
+    if not isinstance(data, dict):
+        raise ValueError("hooks.json root must be an object")
+    merged: dict[str, object] = json.loads(json.dumps(data))
+    hooks = merged.setdefault("hooks", {})
+    if not isinstance(hooks, dict):
+        raise ValueError("hooks.json 'hooks' must be an object")
+    changed = False
+    for event in HOOK_EVENTS:
+        groups = hooks.setdefault(event, [])
+        if not isinstance(groups, list):
+            raise ValueError(f"hooks.json event {event!r} must be an array")
+        found = False
+        for group in groups:
+            if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+                raise ValueError(f"hooks.json event {event!r} contains an invalid matcher group")
+            if any(_is_telos_hook_handler(handler) for handler in group["hooks"]):
+                found = True
+        if not found:
+            groups.append({"hooks": [_trace_hook_handler(event)]})
+            changed = True
+    return merged, changed
+
+
+def _remove_trace_hooks(data: object) -> tuple[dict[str, object], bool]:
+    """Remove only exact TELOS command handlers; preserve every other value."""
+    if not isinstance(data, dict):
+        raise ValueError("hooks.json root must be an object")
+    cleaned: dict[str, object] = json.loads(json.dumps(data))
+    hooks = cleaned.get("hooks")
+    if not isinstance(hooks, dict):
+        return cleaned, False
+    changed = False
+    for event in HOOK_EVENTS:
+        groups = hooks.get(event)
+        if not isinstance(groups, list):
+            continue
+        remaining_groups: list[object] = []
+        for group in groups:
+            if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+                remaining_groups.append(group)
+                continue
+            remaining_handlers = [
+                handler for handler in group["hooks"]
+                if not _is_telos_hook_handler(handler)
+            ]
+            if len(remaining_handlers) == len(group["hooks"]):
+                remaining_groups.append(group)
+                continue
+            changed = True
+            if remaining_handlers or set(group) != {"hooks"}:
+                group["hooks"] = remaining_handlers
+                remaining_groups.append(group)
+        if remaining_groups:
+            hooks[event] = remaining_groups
+        else:
+            hooks.pop(event, None)
+    return cleaned, changed
 
 
 def _extract_provider_base_url(text: str, provider: str) -> str | None:
@@ -249,8 +372,11 @@ class CodexInstaller(AgentInstaller):
         proxy_url: str = "http://127.0.0.1:7171",
         config_path: Path | None = None,
         auth_json_path: Path | None = None,
+        trace_plugin_path: Path | None = None,
+        hooks_path: Path | None = None,
     ) -> None:
         super().__init__(proxy_url=proxy_url)
+        using_default_config = config_path is None
         self.config_path = config_path or _default_config_path()
         # auth.json lives next to config.toml; tests pass a tmp path so they
         # don't depend on the developer's real Codex login.
@@ -258,6 +384,108 @@ class CodexInstaller(AgentInstaller):
             auth_json_path if auth_json_path is not None
             else self.config_path.parent / "auth.json"
         )
+        self.trace_plugin_path = trace_plugin_path or (
+            telos_home() / "integrations/codex/telos-tracing"
+            if using_default_config
+            else self.config_path.parent / ".telos-tracing-plugin"
+        )
+        self.hooks_path = hooks_path or self.config_path.parent / "hooks.json"
+
+    def _install_trace_plugin(self, result: InstallResult) -> bool:
+        changed = False
+        for relative_path, text in _trace_plugin_files().items():
+            path = self.trace_plugin_path / relative_path
+            if _write_if_changed(path, text):
+                result.changed_files.append(path)
+                changed = True
+        result.notes.append(
+            f"prepared Codex tracing plugin bundle v{_TRACE_PLUGIN_VERSION} at "
+            f"{self.trace_plugin_path}"
+        )
+        result.notes.append(
+            "Codex local-plugin registration has no stable non-interactive CLI; "
+            "the bundle is retained for native registration when that API stabilizes"
+        )
+        return changed
+
+    def _install_hook_fallback(self, result: InstallResult) -> bool:
+        existed = self.hooks_path.exists()
+        try:
+            data: object = (
+                json.loads(self.hooks_path.read_text(encoding="utf-8"))
+                if existed
+                else {"description": _FALLBACK_DESCRIPTION, "hooks": {}}
+            )
+            merged, changed = _merge_trace_hooks(data)
+        except (OSError, json.JSONDecodeError, ValueError) as error:
+            result.notes.append(
+                f"tracing compatibility fallback not enabled: {self.hooks_path}: {error}"
+            )
+            return False
+        if changed:
+            if existed:
+                backup = self.hooks_path.with_suffix(self.hooks_path.suffix + ".telos.bak")
+                if not backup.exists():
+                    shutil.copy2(self.hooks_path, backup)
+                    result.backups.append(backup)
+            _atomic_write(
+                self.hooks_path,
+                json.dumps(merged, ensure_ascii=False, indent=2) + "\n",
+            )
+            result.changed_files.append(self.hooks_path)
+        result.notes.append(
+            f"tracing compatibility fallback enabled in {self.hooks_path}; "
+            "existing hooks were preserved"
+        )
+        return changed
+
+    def _uninstall_trace_plugin(self, result: InstallResult) -> None:
+        for relative_path in _trace_plugin_files():
+            path = self.trace_plugin_path / relative_path
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                continue
+            result.changed_files.append(path)
+        # Remove only directories that became empty; foreign files survive.
+        for path in (
+            self.trace_plugin_path / ".codex-plugin",
+            self.trace_plugin_path / "hooks",
+            self.trace_plugin_path,
+        ):
+            try:
+                path.rmdir()
+            except (FileNotFoundError, OSError):
+                pass
+
+    def _uninstall_hook_fallback(self, result: InstallResult) -> None:
+        if not self.hooks_path.exists():
+            return
+        try:
+            original = json.loads(self.hooks_path.read_text(encoding="utf-8"))
+            cleaned, changed = _remove_trace_hooks(original)
+        except (OSError, json.JSONDecodeError, ValueError) as error:
+            result.notes.append(
+                f"could not remove tracing fallback from {self.hooks_path}: {error}"
+            )
+            return
+        if not changed:
+            return
+        hooks = cleaned.get("hooks")
+        only_telos_scaffold = (
+            cleaned.get("description") == _FALLBACK_DESCRIPTION
+            and isinstance(hooks, dict)
+            and not hooks
+            and set(cleaned) == {"description", "hooks"}
+        )
+        if only_telos_scaffold:
+            self.hooks_path.unlink()
+        else:
+            _atomic_write(
+                self.hooks_path,
+                json.dumps(cleaned, ensure_ascii=False, indent=2) + "\n",
+            )
+        result.changed_files.append(self.hooks_path)
 
     def _provider_url(self, auth_mode: str) -> str:
         """Pick the gateway slug + path suffix per Codex auth mode.
@@ -414,6 +642,8 @@ class CodexInstaller(AgentInstaller):
             new_text += "\n"
 
         result = InstallResult(agent=self.name, action="install")
+        tracing_changed = self._install_trace_plugin(result)
+        tracing_changed |= self._install_hook_fallback(result)
         # For chatgpt mode, the gateway also needs the matching upstream slug.
         # Do this even if config.toml is already current, so a fresh `telos
         # init codex` on a machine that lost ~/.telos/config.json self-heals.
@@ -430,7 +660,7 @@ class CodexInstaller(AgentInstaller):
             )
 
         if new_text == original:
-            result.already_installed = True
+            result.already_installed = not tracing_changed
             result.notes.insert(
                 0,
                 f"already connected to the TELOS gateway ({provider_url}); no action"
@@ -475,6 +705,8 @@ class CodexInstaller(AgentInstaller):
 
     def uninstall(self) -> InstallResult:
         result = InstallResult(agent=self.name, action="uninstall")
+        self._uninstall_hook_fallback(result)
+        self._uninstall_trace_plugin(result)
         # Always try to undo telos-side upstream registrations first, so a
         # half-finished previous install (config.toml missing but
         # ~/.telos/config.json polluted) still gets cleaned up.
@@ -523,6 +755,37 @@ class CodexInstaller(AgentInstaller):
 
     def status(self) -> InstallResult:
         result = InstallResult(agent=self.name, action="status")
+        expected_plugin_files = _trace_plugin_files()
+        plugin_current = all(
+            (self.trace_plugin_path / relative_path).is_file()
+            for relative_path in expected_plugin_files
+        )
+        result.notes.append(
+            "Codex tracing plugin bundle is prepared"
+            if plugin_current
+            else "Codex tracing plugin bundle is not prepared"
+        )
+        fallback_current = False
+        try:
+            hooks_data = json.loads(self.hooks_path.read_text(encoding="utf-8"))
+            hooks = hooks_data.get("hooks") if isinstance(hooks_data, dict) else None
+            fallback_current = isinstance(hooks, dict) and all(
+                isinstance(hooks.get(event), list)
+                and any(
+                    isinstance(group, dict)
+                    and isinstance(group.get("hooks"), list)
+                    and any(_is_telos_hook_handler(handler) for handler in group["hooks"])
+                    for group in hooks[event]
+                )
+                for event in HOOK_EVENTS
+            )
+        except (OSError, json.JSONDecodeError):
+            pass
+        result.notes.append(
+            "Codex tracing hooks.json fallback is enabled"
+            if fallback_current
+            else "Codex tracing hooks.json fallback is not enabled"
+        )
         if not self.config_path.exists():
             result.notes.append(f"{self.config_path} does not exist")
             return result

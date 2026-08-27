@@ -268,6 +268,57 @@ def test_install_patches_auth_json_credential_pool(tmp_path: Path) -> None:
         assert rec["auth_pool_patches"][0]["previous_base_url"] == "https://openrouter.ai/api/v1"
     finally:
         _restore_env()
+
+
+def test_codex_pool_survives_hermes_reseed_and_uninstalls_cleanly(
+    tmp_path: Path,
+) -> None:
+    cfg = _sample_hermes_config()
+    cfg["model"].update({
+        "provider": "openai-codex",
+        "base_url": "https://chatgpt.com/backend-api/codex",
+        "api_mode": "codex_responses",
+    })
+    auth = _sample_auth_json("openai-codex")
+    entry = auth["credential_pool"]["openai-codex"][0]
+    entry.update({
+        "source": "device_code",
+        "auth_type": "oauth",
+        "base_url": "https://chatgpt.com/backend-api/codex",
+    })
+
+    config_path = tmp_path / "hermes" / "config.yaml"
+    _write_yaml(config_path, cfg)
+    _write_json(config_path.parent / "auth.json", auth)
+    os.environ["TELOS_HOME"] = str(tmp_path / "telos-home")
+    try:
+        inst = HermesInstaller(
+            proxy_url="http://127.0.0.1:7171",
+            config_path=config_path,
+            state_path=tmp_path / "state.json",
+        )
+        inst.install()
+
+        patched = json.loads((config_path.parent / "auth.json").read_text())
+        patched_entry = patched["credential_pool"]["openai-codex"][0]
+        assert patched_entry["source"] == "manual:device_code"
+        assert patched_entry["base_url"] == (
+            "http://127.0.0.1:7171/_h/hermes/upstreams/openai-codex"
+        )
+        assert patched["suppressed_sources"]["openai-codex"] == ["device_code"]
+        assert inst.status().already_installed is True
+        assert inst.install().already_installed is True
+
+        inst.uninstall()
+        restored = json.loads((config_path.parent / "auth.json").read_text())
+        restored_entry = restored["credential_pool"]["openai-codex"][0]
+        assert restored_entry["source"] == "device_code"
+        assert restored_entry["base_url"] == "https://chatgpt.com/backend-api/codex"
+        assert "suppressed_sources" not in restored
+    finally:
+        _restore_env()
+
+
 def test_uninstall_restores_auth_json_credential_pool(tmp_path: Path) -> None:
     """uninstall() restores the credential pool base_url in auth.json."""
     inst, config_path, state_path = _make_inst(tmp_path)

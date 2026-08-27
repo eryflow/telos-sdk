@@ -6,7 +6,7 @@
 
 **将长任务上下文私有化，把真实生产轨迹变成可回放样本与离线进化证据。**
 
-<sub>🔒 本地优先 &nbsp;·&nbsp; 🔌 Harness 无关 &nbsp;·&nbsp; ⏪ 可回放 &nbsp;·&nbsp; 🧬 为持续进化而生</sub>
+<sub>💰 Token 账单最高节省约 90% &nbsp;·&nbsp; 🔒 本地优先 &nbsp;·&nbsp; 🔌 Harness 无关 &nbsp;·&nbsp; ⏪ 可回放 &nbsp;·&nbsp; 🧬 为持续进化而生</sub>
 
 <br/>
 
@@ -15,7 +15,7 @@
 [![Status](https://img.shields.io/badge/status-Beta-d8851f?style=flat-square)](CHANGELOG.md)
 [![Version](https://img.shields.io/badge/version-0.1.8-4FB3BF?style=flat-square)](CHANGELOG.md)
 
-[**快速开始**](#quickstart) &nbsp;·&nbsp; [**工作原理**](#how-it-works) &nbsp;·&nbsp; [**当前能力**](#what-ships-today) &nbsp;·&nbsp; [**设计决策**](docs/adr/0001-local-trace-and-task-type-evolution.md)
+[**快速开始**](#quickstart) &nbsp;·&nbsp; [**工作原理**](#how-it-works) &nbsp;·&nbsp; [**节省效果**](#cost-optimization) &nbsp;·&nbsp; [**当前能力**](#what-ships-today) &nbsp;·&nbsp; [**设计决策**](docs/adr/0002-opik-style-agent-tracing-platform.md)
 
 [📖 English](README.md) &nbsp;|&nbsp; **🇨🇳 简体中文**
 
@@ -42,10 +42,12 @@ Prompt Cache 优化仍然是 TELOS 的底层能力，但它现在服务于更完
 
 ```mermaid
 flowchart LR
-    H["Agent Harness<br/>Codex · Claude Code · OpenClaw · Hermes"] --> G["本地 TELOS Gateway"]
+    H["Agent Harness<br/>Codex · DeepSeek Harness · 其他"] --> G["本地 TELOS Gateway"]
     G --> M["你的模型供应商"]
     G --> C["本地请求 Corpus"]
-    H -. "Reporter 事件" .-> T["本地生命周期 Trace"]
+    H -->|"原生 Hook / Telemetry"| T["Thread → Trace → Span"]
+    G -->|"模型 Span"| T
+    T --> D[("本地 SQLite")]
     C --> R["回放与回归样本"]
     T --> R
     R --> E["自动离线评测"]
@@ -56,7 +58,7 @@ flowchart LR
 TELOS 保存两类互补记录：
 
 1. **Gateway Corpus** 保存模型请求，用于确定性回放与成本对比。
-2. **Harness Reporter Trace** 保存模型 API 看不到的生命周期事件：执行尝试、工具结果、审批、工作区变更、产物、反馈与最终结果。
+2. **Tracing 数据库**将 Harness 与模型生命周期保存为可查询的 `Thread → Trace → Span` 树，包括工具、子 Agent、审批、usage、TTFT 与错误。
 
 两者通过 `session_id` 关联为同一份任务历史，同时保留既有 replay 数据格式。
 
@@ -68,9 +70,10 @@ TELOS 保存两类互补记录：
 |---|---|
 | 为 Codex、Claude Code、OpenClaw 和 Hermes 注入本地 Gateway | **已可用** |
 | 在本地记录模型请求 Corpus，并跨模式回放会话 | **已可用** |
-| 带鉴权的 Reporter 接口与本地 append-only 事件存储 | **已可用** |
+| SQLite Trace/Span 存储、带鉴权的 batch ingest 与本地 Trace Explorer | **已可用** |
+| Codex 原生 Hook 与 DeepSeek Harness telemetry adapter | **已可用** |
 | `telos evolve --task` 任务类型策略，默认离线评测、人工发布 | **已可用** |
-| 为每个 Harness 自动采集 Tool、Approval、Workspace 事件的原生 Reporter Hook | **下一阶段** |
+| 更多 Harness 的原生 tracing adapter | **下一阶段** |
 | 自动结果标注、失败归因、回归集生成和候选方案评测 | **下一阶段** |
 | SFT/RL 数据集导出 | **规划中** |
 
@@ -109,9 +112,9 @@ TELOS 将状态持久化到 `~/.telos/`：
 
 | 路径 | 内容 |
 |---|---|
-| `config.json` | Gateway、Harness Trace 和进化策略；包含本地 Reporter Token |
+| `config.json` | Gateway、Harness Trace 和进化策略；包含各 Harness 的 tracing token |
 | `corpus/` | 用于回放的原始模型请求 |
-| `traces/<harness>/` | append-only Reporter 事件流 |
+| `telos.db` | SQLite projects、threads、traces、spans 与 feedback |
 | `usage.jsonl` | Token 用量与成本指标 |
 
 这些文件可能包含 Prompt、源代码、工具结果，以及模型请求中出现的凭据，应按敏感数据保护。TELOS 不会把它们上传到 TELOS 服务，但你配置的模型供应商仍会收到完成推理所需的请求。
@@ -120,28 +123,26 @@ TELOS 将状态持久化到 `~/.telos/`：
 
 ## Trace 数据模型
 
-TELOS 使用一套贴合 Agent 实际工作的最小层级：
+TELOS 在不同 Harness 间使用同一套最小层级：
 
 ```text
-TaskType  →  TaskRun  →  Attempt  →  Event
+Project  →  Thread  →  Trace  →  Span
 ```
 
-- **TaskType**：可复用的任务类别，例如“代码缺陷修复”。
-- **TaskRun**：一次具体任务及其输入和验收标准。
-- **Attempt**：某组 Prompt、Tool、Workflow 和模型配置下的一次执行。
-- **Event**：Attempt 中按顺序发生的事实。
+- **Project**：本地逻辑分组。
+- **Thread**：一次 Harness Session 或对话。
+- **Trace**：一次用户 turn 或 Agent attempt。
+- **Span**：一次 Agent、LLM、Tool、Approval 或 Compaction 操作。
 
-Hook Adapter 可以通过 CLI 上报生命周期事件，无需自行读取 Reporter 凭据：
+安装 adapter 后，即可在本地查看统一 Trace 树：
 
 ```bash
-telos report \
-  --harness codex \
-  --session task-123 \
-  --event tool.finished \
-  --data '{"tool":"pytest","exit_code":1}'
+telos init --harness codex
+telos init --harness deepseek-harness --replace-telemetry-backend
+# http://127.0.0.1:7171/__telos/traces
 ```
 
-本地存储会分配单调递增序号、按 `event_id` 去重，并为每个 Harness Session 写入独立 JSONL 事件流。
+Adapter 生成稳定 ID 并提交幂等实体快照；Gateway 是唯一的 SQLite writer。
 
 ## 自我进化契约
 
@@ -159,11 +160,22 @@ telos report \
 
 每个候选方案只改变 Prompt、Tool 策略、Workflow 或模型路由中的一项，避免多个变量同时变化而无法归因。私有评测标准不会进入候选生成上下文；通过评测的候选只会被推荐，不会静默发布到生产环境。
 
-完整取舍、替代方案与阶段边界见 [ADR-0001：本地 Trace 与按任务类型持续进化](docs/adr/0001-local-trace-and-task-type-evolution.md)。
+Tracing 的完整取舍、替代方案与阶段边界见 [ADR-0002：基于 Trace/Span 的 Agent Tracing 平台](docs/adr/0002-opik-style-agent-tracing-platform.md)。
+
+<a id="cost-optimization"></a>
 
 ## 上下文与成本优化仍然存在
 
-TELOS 仍会把 Agent 上下文规范化为稳定 IR，并为模型供应商的 KV Cache 复用进行排列。在既有的 OpenClaw 六轮实测中，总成本从 `$0.3623` 降至 `$0.0281`（`−92.3%`）；SWE-bench Verified 测得 new input `−52.8%`、端到端成本 `−40.5%`，解决率无统计显著回归。
+Prompt Cache 优化仍然是 TELOS 的底层能力，无需重写或压缩 Prompt。TELOS 会把 Agent 上下文规范化为稳定 IR，并为模型供应商的 KV Cache 复用进行排列。
+
+在既有的一次真实 OpenClaw 六轮实测中：
+
+| 模式 | Raw input tokens | Cache read | 六轮总成本 |
+|---|---:|---:|---:|
+| Passthrough | 24,151 | 0 | **$0.3623** |
+| TELOS | 0 | 18,701 | **$0.0281（−92.3%）** |
+
+SWE-bench Verified 测得 new input `−52.8%`、端到端成本 `−40.5%`。A/B 解决率对比未发现统计显著回归（McNemar `p = 0.66`）。实际节省取决于工作负载和模型供应商的缓存计价；可用 `telos dashboard` 查看自身流量的绝对成本。
 
 详见[协议](https://docs.telosai.pro/zh/concepts/protocol)、[Benchmark 方法](https://docs.telosai.pro/zh/benchmark/swebench)和[支持矩阵](https://docs.telosai.pro/zh/reference/support-matrix)。
 

@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import hmac
 import json
 import logging
 import time
@@ -39,6 +38,7 @@ from collections import OrderedDict, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, TYPE_CHECKING
+from uuid import uuid4
 
 import aiohttp
 from aiohttp import web
@@ -58,7 +58,8 @@ from telos.proxy.pipeline import (
     process_openai_request,
 )
 from telos.scripts.telos_anthropic_transport import _detect_harness_signal
-from telos.trace_store import REPORTER_EVENT_KINDS, TraceStore
+from telos.tracing import SQLiteTraceStore
+from telos.proxy.tracing_api import TracingAPI
 
 if TYPE_CHECKING:
     from telos.config import UpstreamConfig
@@ -69,7 +70,9 @@ _DEFAULT_UPSTREAM = "https://api.anthropic.com"
 # Harness tags accepted by the ``/_h/<harness>/`` URL prefix mechanism.
 # Installers emit these in the base_url they patch into the agent's config so
 # attribution is fixed at the source, no detection guess-work involved.
-_VALID_HARNESS_TAGS = frozenset({"claude-code", "hermes", "openclaw", "codex"})
+_VALID_HARNESS_TAGS = frozenset({
+    "claude-code", "hermes", "openclaw", "codex", "deepseek-harness",
+})
 
 # Headers preserved when forwarding to upstream (auth / protocol version / Anthropic private beta).
 # Host / Content-Length are computed by aiohttp itself; do not pass them through from the client.
@@ -101,10 +104,6 @@ _log = logging.getLogger("telos.proxy")
 # upstream, so retrying does not double-bill / double-process.
 _MAX_CONNECT_RETRIES = 3
 _CONNECT_BACKOFF_BASE = 0.5   # seconds; exponential backoff 0.5 / 1.0 / 2.0
-_MAX_REPORTER_BODY_BYTES = 1024 * 1024
-_MAX_REPORTER_EVENTS = 100
-
-
 def _wire_tool_result_first(req: Mapping[str, Any]) -> bool:
     """Verify that the tool_result blocks of every user message in the request body come before non-tool_result blocks.
 
@@ -395,7 +394,9 @@ def _summarize_openai_messages(raw: Mapping[str, Any]) -> list[dict[str, Any]]:
     on the assistant message; ``role=tool`` carries ``tool_call_id``. We
     surface enough for the developer panel to render without needing the IR.
     """
-    messages = raw.get("messages")
+    messages = raw.get("messages", raw.get("input"))
+    if isinstance(messages, str):
+        messages = [{"role": "user", "content": messages}]
     if not isinstance(messages, list):
         return []
     out: list[dict[str, Any]] = []
@@ -454,7 +455,7 @@ class ProxyApp:
         mode: TelosMode | None = None,
         corpus_dir: Path | None = None,
         record: bool = True,
-        trace_dir: Path | None = None,
+        tracing_db: Path | None = None,
         trace_harnesses: Mapping[str, Mapping[str, Any]] | None = None,
     ):
         self.upstream = upstream.rstrip("/")
@@ -476,7 +477,9 @@ class ProxyApp:
         # response. Can be turned off with --no-record.
         self._record = record
         self._corpus_dir = corpus_dir if record else None
-        self._trace_store = TraceStore(trace_dir)
+        self._tracing_store = (
+            SQLiteTraceStore(tracing_db) if tracing_db is not None else None
+        )
         self._trace_harnesses = (
             {name: dict(policy) for name, policy in trace_harnesses.items()}
             if trace_harnesses is not None else None
@@ -621,6 +624,121 @@ class ProxyApp:
     async def on_shutdown(self, app: web.Application) -> None:
         if self._session is not None and not self._session.closed:
             await self._session.close()
+        if self._tracing_store is not None:
+            self._tracing_store.close()
+
+    def _trace_policy(self, harness: str) -> Mapping[str, Any]:
+        if self._trace_harnesses is None:
+            from telos.config import load_config
+            return load_config().trace_harnesses.get(harness) or {}
+        return self._trace_harnesses.get(harness) or {}
+
+    def _start_gateway_model_span(
+        self,
+        *,
+        harness: str,
+        session_id: str,
+        raw: Mapping[str, Any],
+        model: str,
+        provider: str,
+        route: str,
+        streaming: bool,
+    ) -> dict[str, Any] | None:
+        store = self._tracing_store
+        policy = self._trace_policy(harness)
+        if (
+            store is None
+            or policy.get("enabled") is not True
+            or policy.get("model_span_source") != "gateway"
+        ):
+            return None
+        started = time.time_ns() // 1_000
+        trace = store.find_active_trace(harness, session_id)
+        if trace is None:
+            synthetic_key = str(uuid4())
+            trace = store.ensure_synthetic_trace(
+                harness=harness,
+                thread_external_id=session_id,
+                trace_external_id=synthetic_key,
+                input=raw,
+                start_time_us=started,
+            )
+        span_id = str(uuid4())
+        body = {
+            "id": span_id,
+            "trace_id": trace["id"],
+            "source": "gateway",
+            "external_id": span_id,
+            "name": model or "model response",
+            "type": "llm",
+            "status": "running",
+            "start_time_us": started,
+            "input": dict(raw),
+            "metadata": {
+                "protocol": "openai-responses",
+                "route": route,
+                "streaming": streaming,
+            },
+            "model": model or None,
+            "provider": provider,
+            "source_updated_at_us": started,
+        }
+        try:
+            store.upsert_span(body)
+        except Exception:  # noqa: BLE001
+            _log.exception("model Trace start failed")
+            return None
+        return body
+
+    def _finish_gateway_model_span(
+        self,
+        handle: dict[str, Any] | None,
+        *,
+        status: str,
+        usage: Mapping[str, Any],
+        http_status: int,
+        output: Any = None,
+        error: Any = None,
+        ttft_us: int | None = None,
+    ) -> None:
+        if handle is None or self._tracing_store is None:
+            return
+        finished = time.time_ns() // 1_000
+        normalized = _normalize_responses_usage(usage)
+        reasoning = int(
+            (usage.get("output_tokens_details") or {}).get("reasoning_tokens", 0)
+            or 0
+        )
+        cost_usd_micros: int | None = None
+        try:
+            from telos.scripts.build_savings_dashboard import _cost_usd
+            cost_usd_micros = round(
+                sum(_cost_usd(str(handle.get("model") or ""), normalized).values())
+                * 1_000_000
+            )
+        except Exception:  # noqa: BLE001
+            _log.debug("model Trace cost estimation failed", exc_info=True)
+        body = {
+            **handle,
+            "status": status,
+            "end_time_us": max(finished, int(handle["start_time_us"])),
+            "output": output,
+            "usage": dict(usage),
+            "input_tokens": normalized["raw_input"] + normalized["cache_read"],
+            "output_tokens": normalized["output"],
+            "cache_read_tokens": normalized["cache_read"],
+            "cache_write_tokens": normalized["cache_write"],
+            "reasoning_tokens": reasoning,
+            "cost_usd_micros": cost_usd_micros,
+            "ttft_us": ttft_us,
+            "error": error,
+            "metadata": {**handle["metadata"], "http_status": http_status},
+            "source_updated_at_us": finished,
+        }
+        try:
+            self._tracing_store.upsert_span(body)
+        except Exception:  # noqa: BLE001
+            _log.exception("model Trace finish failed")
 
     def _forward_headers(self, request: web.Request) -> dict[str, str]:
         out: dict[str, str] = {"content-type": "application/json"}
@@ -1149,91 +1267,6 @@ class ProxyApp:
         })
 
     # ------------------------------------------------------------------
-    # POST /__telos/reporter/events -- Harness-side facts (loopback only)
-    # ------------------------------------------------------------------
-
-    async def handle_reporter_events(self, request: web.Request) -> web.Response:
-        if not self._is_loopback(request):
-            return web.json_response(
-                {"error": "reporter endpoint is loopback-only"}, status=403)
-        body = await request.read()
-        if len(body) > _MAX_REPORTER_BODY_BYTES:
-            return web.json_response({"error": "reporter payload too large"}, status=413)
-        try:
-            payload = json.loads(body)
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return web.json_response({"error": "invalid JSON"}, status=400)
-        if not isinstance(payload, dict):
-            return web.json_response({"error": "top level must be an object"}, status=400)
-
-        harness = payload.get("harness")
-        session_id = payload.get("session_id")
-        token = payload.get("reporter_token")
-        events = payload.get("events")
-        if not isinstance(harness, str) or not harness.strip():
-            return web.json_response({"error": "harness is required"}, status=400)
-        if not isinstance(session_id, str) or not session_id.strip():
-            return web.json_response({"error": "session_id is required"}, status=400)
-        if not isinstance(token, str):
-            return web.json_response({"error": "invalid reporter token"}, status=401)
-
-        if self._trace_harnesses is None:
-            from telos.config import load_config
-            policies = load_config().trace_harnesses
-        else:
-            policies = self._trace_harnesses
-        policy = policies.get(harness)
-        expected = policy.get("reporter_token") if policy else None
-        if (not policy or policy.get("enabled") is not True
-                or not isinstance(expected, str)
-                or not hmac.compare_digest(token, expected)):
-            return web.json_response({"error": "invalid reporter token"}, status=401)
-        if (not isinstance(events, list) or not events
-                or len(events) > _MAX_REPORTER_EVENTS):
-            return web.json_response(
-                {"error": f"events must contain 1..{_MAX_REPORTER_EVENTS} items"},
-                status=400,
-            )
-
-        validated: list[tuple[str, str, dict[str, Any], str | None]] = []
-        for event in events:
-            if not isinstance(event, dict):
-                return web.json_response({"error": "each event must be an object"}, status=400)
-            event_id = event.get("event_id")
-            kind = event.get("kind")
-            data = event.get("data", {})
-            observed_at = event.get("observed_at")
-            if not isinstance(event_id, str) or not event_id or len(event_id) > 200:
-                return web.json_response(
-                    {"error": "event_id is required (max 200 chars)"}, status=400)
-            if kind not in REPORTER_EVENT_KINDS:
-                return web.json_response(
-                    {"error": f"unsupported event kind: {kind!r}"}, status=400)
-            if not isinstance(data, dict):
-                return web.json_response({"error": "event data must be an object"}, status=400)
-            if observed_at is not None and not isinstance(observed_at, str):
-                return web.json_response(
-                    {"error": "observed_at must be a string"}, status=400)
-            validated.append((event_id, kind, data, observed_at))
-
-        accepted: list[dict[str, Any]] = []
-        try:
-            for event_id, kind, data, observed_at in validated:
-                seq, created = self._trace_store.append(
-                    harness=harness,
-                    session_id=session_id,
-                    event_id=event_id,
-                    kind=kind,
-                    data=data,
-                    observed_at=observed_at,
-                )
-                accepted.append({"event_id": event_id, "seq": seq, "created": created})
-        except OSError:
-            _log.exception("reporter Trace write failed")
-            return web.json_response({"error": "local Trace write failed"}, status=500)
-        return web.json_response({"accepted": accepted})
-
-    # ------------------------------------------------------------------
     # GET /__telos/developer -- developer-facing live session structure / tool-call statistics
     # ------------------------------------------------------------------
 
@@ -1302,6 +1335,8 @@ class ProxyApp:
         usage: Mapping[str, Any],
         call_index: int,
         latency_s: float,
+        *,
+        usage_norm: Mapping[str, Any] | None = None,
     ) -> None:
         try:
             entry = self._inspector.touch(session_id)
@@ -1312,7 +1347,8 @@ class ProxyApp:
                 tool_uses=list(result.tool_uses),
                 tool_results=list(result.tool_results),
                 raw_messages=list(result.raw_messages),
-                usage_norm=_normalize_usage(dict(usage)),
+                usage_norm=(dict(usage_norm) if usage_norm is not None
+                            else _normalize_usage(dict(usage))),
                 usage_raw=dict(usage),
                 latency_s=latency_s,
                 model=result.model,
@@ -1610,7 +1646,8 @@ class ProxyApp:
                                     f"Invalid JSON: {e}")
 
         session_id = (
-            request.headers.get("x-telos-session")
+            request.headers.get("session_id")
+            or request.headers.get("x-telos-session")
             or _derive_session_id(raw, request.headers)
         )
         session_state = self._registry.get_or_create(session_id)
@@ -1883,6 +1920,10 @@ class ProxyApp:
         call_index: int,
     ) -> None:
         """Append one OpenAI-side usage line to the usage log (dashboard input)."""
+        self._update_inspector(
+            session_id, result, usage, call_index, latency_s,
+            usage_norm=_normalize_openai_usage(usage),
+        )
         if self.usage_log is None:
             return
         try:
@@ -1941,7 +1982,8 @@ class ProxyApp:
                                     f"Invalid JSON: {e}")
 
         session_id = (
-            request.headers.get("x-telos-session")
+            request.headers.get("session_id")
+            or request.headers.get("x-telos-session")
             or _derive_session_id(raw, request.headers)
         )
         session_state = self._registry.get_or_create(session_id)
@@ -1965,6 +2007,7 @@ class ProxyApp:
             routing_key=None,
             model=raw.get("model", ""),
         )
+        result.raw_messages = _summarize_openai_messages(raw)
         # Tag wins; else via (install time); else header / per-client memory.
         tag = request.get("_telos_harness_tag")
         if tag:
@@ -1983,6 +2026,15 @@ class ProxyApp:
         result.compare_group = compare_group
 
         is_streaming = bool(raw.get("stream", False))
+        trace_span = self._start_gateway_model_span(
+            harness=result.harness,
+            session_id=session_id,
+            raw=raw,
+            model=result.model,
+            provider=slug,
+            route=tail,
+            streaming=is_streaming,
+        )
         url = f"{upstream_cfg.url.rstrip('/')}/{tail}"
         if request.query_string:
             url = f"{url}?{request.query_string}"
@@ -1998,15 +2050,23 @@ class ProxyApp:
         except aiohttp.ClientError as e:
             _log.error("Upstream connection failed (call=%d): %s",
                        call_index, e)
+            self._finish_gateway_model_span(
+                trace_span,
+                status="error",
+                usage={},
+                http_status=502,
+                error={"type": type(e).__name__, "message": str(e)},
+            )
             return _anthropic_error(502, "api_error", f"Upstream error: {e}")
 
         if is_streaming:
             return await self._stream_responses_response(
                 request, upstream, session_id, result, session_state,
-                call_index, t0,
+                call_index, t0, trace_span,
             )
         return await self._buffered_responses_response(
             upstream, session_id, result, session_state, call_index, t0,
+            trace_span,
         )
 
     async def _buffered_responses_response(
@@ -2017,15 +2077,23 @@ class ProxyApp:
         session_state: BridgeSessionState,
         call_index: int,
         t0: float,
+        trace_span: dict[str, Any] | None,
     ) -> web.Response:
+        ttft_us: int | None = None
         try:
-            body = await upstream.read()
+            first = await upstream.content.readany()
+            if trace_span is not None and first:
+                ttft_us = max(
+                    0, time.time_ns() // 1_000 - int(trace_span["start_time_us"])
+                )
+            body = first + await upstream.read()
             status = upstream.status
             ct = upstream.headers.get("content-type", "application/json")
         finally:
             upstream.release()
 
         usage: dict[str, Any] = {}
+        parsed: Any = None
         if status == 200:
             try:
                 parsed = json.loads(body.decode("utf-8"))
@@ -2045,6 +2113,16 @@ class ProxyApp:
             latency_s=latency_s, streaming=False, status=status,
             call_index=call_index,
         )
+        self._finish_gateway_model_span(
+            trace_span,
+            status="ok" if status < 400 else "error",
+            usage=usage,
+            http_status=status,
+            output=parsed if status < 400 else None,
+            error=(parsed if parsed is not None else body[:2000].decode("utf-8", "replace"))
+            if status >= 400 else None,
+            ttft_us=ttft_us,
+        )
         return web.Response(body=body, status=status,
                             headers={"Content-Type": ct})
 
@@ -2057,6 +2135,7 @@ class ProxyApp:
         session_state: BridgeSessionState,
         call_index: int,
         t0: float,
+        trace_span: dict[str, Any] | None,
     ) -> web.StreamResponse:
         status = upstream.status
         if status != 200:
@@ -2072,6 +2151,17 @@ class ProxyApp:
                 session_id, result, {}, session_state,
                 latency_s=time.time() - t0, streaming=True, status=status,
                 call_index=call_index,
+            )
+            try:
+                error_body: Any = json.loads(body.decode("utf-8"))
+            except Exception:  # noqa: BLE001
+                error_body = body[:2000].decode("utf-8", "replace")
+            self._finish_gateway_model_span(
+                trace_span,
+                status="error",
+                usage={},
+                http_status=status,
+                error=error_body,
             )
             return web.Response(body=body, status=status,
                                 headers={"Content-Type": ct})
@@ -2091,25 +2181,44 @@ class ProxyApp:
             _log.info("downstream disconnected before stream start (call=%d): %s",
                       call_index, e)
             upstream.release()
+            self._finish_gateway_model_span(
+                trace_span,
+                status="cancelled",
+                usage={},
+                http_status=200,
+                error={"type": type(e).__name__, "message": str(e)},
+            )
             return downstream
 
         usage_aggregate: dict[str, Any] = {}
+        completed_response: dict[str, Any] = {}
         sse_buf = b""
+        ttft_us: int | None = None
+        disconnected = False
+        stream_error: Any = None
         try:
             async for chunk in upstream.content.iter_any():
+                if trace_span is not None and ttft_us is None and chunk:
+                    ttft_us = max(
+                        0, time.time_ns() // 1_000 - int(trace_span["start_time_us"])
+                    )
                 try:
                     await downstream.write(chunk)
                 except (ConnectionResetError, asyncio.CancelledError):
                     _log.info("downstream disconnected mid-stream (call=%d)",
                               call_index)
+                    disconnected = True
                     break
                 sse_buf += chunk
                 while b"\n\n" in sse_buf:
                     block, sse_buf = sse_buf.split(b"\n\n", 1)
-                    self._peek_responses_sse_block(block, usage_aggregate)
-        except aiohttp.ClientPayloadError:
+                    self._peek_responses_sse_block(
+                        block, usage_aggregate, completed_response
+                    )
+        except aiohttp.ClientPayloadError as exc:
             _log.warning("upstream closed connection mid-stream (call=%d)",
                          call_index)
+            stream_error = {"type": type(exc).__name__, "message": str(exc)}
 
         try:
             await downstream.write_eof()
@@ -2124,10 +2233,25 @@ class ProxyApp:
             latency_s=latency_s, streaming=True, status=200,
             call_index=call_index,
         )
+        trace_status = "error" if stream_error is not None else (
+            "cancelled" if disconnected else "ok"
+        )
+        self._finish_gateway_model_span(
+            trace_span,
+            status=trace_status,
+            usage=usage_aggregate,
+            http_status=200,
+            output=completed_response or None,
+            error=stream_error,
+            ttft_us=ttft_us,
+        )
         return downstream
 
     def _peek_responses_sse_block(
-        self, block: bytes, usage: dict[str, Any],
+        self,
+        block: bytes,
+        usage: dict[str, Any],
+        completed_response: dict[str, Any] | None = None,
     ) -> None:
         """Responses API SSE: usage is carried on the ``response.completed``
         event under ``data.response.usage``. Silently swallow errors.
@@ -2153,6 +2277,9 @@ class ProxyApp:
         u = resp.get("usage")
         if isinstance(u, dict):
             usage.update(u)
+        if completed_response is not None:
+            completed_response.clear()
+            completed_response.update(resp)
 
     def _log_responses_usage(
         self,
@@ -2172,6 +2299,10 @@ class ProxyApp:
         aggregator picks it up; only ``normalized`` uses the Responses-side
         field names (``input_tokens`` + ``input_tokens_details.cached_tokens``).
         """
+        self._update_inspector(
+            session_id, result, usage, call_index, latency_s,
+            usage_norm=_normalize_responses_usage(usage),
+        )
         if self.usage_log is None:
             return
         try:
@@ -2274,6 +2405,10 @@ async def _access_log_middleware(request: web.Request, handler):  # type: ignore
     return await handler(request)
 
 
+async def _internal_not_found(request: web.Request) -> web.Response:
+    return _anthropic_error(404, "not_found", f"unknown TELOS route: {request.path}")
+
+
 # aiohttp >= 3.9 deprecates bare-string application keys (NotAppKeyWarning).
 # Use a typed AppKey so the stored ProxyApp handle stays accessible without the
 # warning. ProxyApp is defined above; the key is module-level for reuse.
@@ -2291,7 +2426,7 @@ def make_app(
     mode: TelosMode | None = None,
     corpus_dir: Path | None = None,
     record: bool = True,
-    trace_dir: Path | None = None,
+    tracing_db: Path | None = None,
     trace_harnesses: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> web.Application:
     """Construct a complete aiohttp application. Reusable for tests / ASGI embedding."""
@@ -2305,7 +2440,7 @@ def make_app(
         mode=mode,
         corpus_dir=corpus_dir,
         record=record,
-        trace_dir=trace_dir,
+        tracing_db=tracing_db,
         trace_harnesses=trace_harnesses,
     )
     # client_max_size: aiohttp defaults to only 1 MiB. Harnesses like Claude Code, in a
@@ -2331,9 +2466,24 @@ def make_app(
     app.router.add_route("GET", "/__telos/control/mode", proxy.handle_control_mode)
     app.router.add_route("POST", "/__telos/control/mode", proxy.handle_control_mode)
     app.router.add_post("/__telos/control/reset", proxy.handle_control_reset)
-    app.router.add_post("/__telos/reporter/events", proxy.handle_reporter_events)
+    if proxy._tracing_store is not None:
+        tracing_api = TracingAPI(proxy._tracing_store, proxy._trace_harnesses)
+        app.router.add_post("/__telos/tracing/v1/batch", tracing_api.batch)
+        app.router.add_get("/__telos/traces", tracing_api.page)
+        app.router.add_get("/__telos/api/v1/projects", tracing_api.projects)
+        app.router.add_get("/__telos/api/v1/traces", tracing_api.traces)
+        app.router.add_get(
+            "/__telos/api/v1/traces/{trace_id}", tracing_api.trace_detail,
+        )
+        app.router.add_get(
+            "/__telos/api/v1/threads/{thread_id}", tracing_api.thread_detail,
+        )
+        app.router.add_post(
+            "/__telos/api/v1/feedback-scores", tracing_api.feedback,
+        )
     app.router.add_get("/__telos/developer", proxy.handle_developer)
     app.router.add_get("/__telos/developer.json", proxy.handle_developer_json)
+    app.router.add_route("*", "/__telos/{tail:.*}", _internal_not_found)
     app.router.add_route("*", "/{tail:.*}", proxy.handle_passthrough)
     app.on_shutdown.append(proxy.on_shutdown)
     app[PROXY_APP_KEY] = proxy
@@ -2353,7 +2503,7 @@ def run(
     mode: TelosMode | None = None,
     corpus_dir: Path | None = None,
     record: bool = True,
-    trace_dir: Path | None = None,
+    tracing_db: Path | None = None,
     trace_harnesses: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> None:
     """Blocking startup (for the CLI entry point)."""
@@ -2362,6 +2512,9 @@ def run(
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     mode = mode or TelosMode()
+    if tracing_db is None:
+        from telos.config import telos_home
+        tracing_db = telos_home() / "telos.db"
     app = make_app(
         upstream=upstream,
         upstreams=upstreams,
@@ -2372,7 +2525,7 @@ def run(
         mode=mode,
         corpus_dir=corpus_dir,
         record=record,
-        trace_dir=trace_dir,
+        tracing_db=tracing_db,
         trace_harnesses=trace_harnesses,
     )
     _log.info("TELOS gateway listening on http://%s:%d → %s", host, port, upstream)
@@ -2391,6 +2544,7 @@ def run(
     _log.info("developer    → http://%s:%d/__telos/developer"
               " (live session inspector; JSON at /__telos/developer.json)",
               host, port)
+    _log.info("traces       → http://%s:%d/__telos/traces", host, port)
     if strict:
         _log.info("strict mode ON — a TELOS failure returns 500 (no degradation to passthrough)")
     web.run_app(app, host=host, port=port, print=None, access_log=None)

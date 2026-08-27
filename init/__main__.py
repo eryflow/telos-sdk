@@ -48,8 +48,20 @@ def _render(result: InstallResult) -> str:
     return "\n".join(lines)
 
 
-def _make_installer(name: str, gateway_url: str):
+def _make_installer(
+    name: str,
+    gateway_url: str,
+    *,
+    dsh_profile: str = "web",
+    replace_telemetry_backend: bool = False,
+):
     factory = INSTALLERS[name]
+    if name == "deepseek-harness":
+        return factory(
+            proxy_url=gateway_url,
+            profile=dsh_profile,
+            replace_telemetry_backend=replace_telemetry_backend,
+        )
     return factory(proxy_url=gateway_url)
 
 
@@ -70,7 +82,9 @@ def _harness_arg(value: str) -> str:
     )
 
 
-def _is_injected(name: str, gateway_url: str = "") -> bool:
+def _is_injected(
+    name: str, gateway_url: str = "", *, dsh_profile: str = "web"
+) -> bool:
     """Whether telos currently has its gateway redirect injected for ``name``.
 
     ``gateway_url`` must be the address the injected configs are expected to
@@ -82,14 +96,29 @@ def _is_injected(name: str, gateway_url: str = "") -> bool:
     still runs and surfaces the underlying error rather than silently skipping it.
     """
     try:
-        return _make_installer(name, gateway_url).status().already_installed
+        return _make_installer(
+            name, gateway_url, dsh_profile=dsh_profile
+        ).status().already_installed
     except Exception:  # noqa: BLE001 - a broken config shouldn't hide the harness
         return True
 
 
-def _run_one(name: str, gateway_url: str, *, uninstall: bool, status: bool) -> tuple[int, InstallResult | None]:
+def _run_one(
+    name: str,
+    gateway_url: str,
+    *,
+    uninstall: bool,
+    status: bool,
+    dsh_profile: str = "web",
+    replace_telemetry_backend: bool = False,
+) -> tuple[int, InstallResult | None]:
     try:
-        installer = _make_installer(name, gateway_url)
+        installer = _make_installer(
+            name,
+            gateway_url,
+            dsh_profile=dsh_profile,
+            replace_telemetry_backend=replace_telemetry_backend,
+        )
         if status:
             result = installer.status()
         elif uninstall:
@@ -170,6 +199,10 @@ def main(argv: list[str] | None = None) -> int:
                         default=None,
                         help="gateway address (default: running daemon if any, else ~/.telos/config.json)")
     parser.add_argument("--status", action="store_true", help="view only, do not change files")
+    parser.add_argument("--dsh-profile", default="web", metavar="NAME",
+                        help="DeepSeek Harness profile to patch (default: web)")
+    parser.add_argument("--replace-telemetry-backend", action="store_true",
+                        help="allow DeepSeek Harness init to disable its existing telemetry backend")
     parser.add_argument("--no-gateway", action="store_true",
                         help="only inject config, do not auto-start the gateway")
     args = parser.parse_args(argv)
@@ -201,13 +234,25 @@ def main(argv: list[str] | None = None) -> int:
     telos_config_path = config_path()
     config_changed = False
     for name in targets:
-        sub_rc, result = _run_one(name, gateway_url, uninstall=False,
-                                  status=args.status)
+        sub_rc, result = _run_one(
+            name,
+            gateway_url,
+            uninstall=False,
+            status=args.status,
+            dsh_profile=args.dsh_profile,
+            replace_telemetry_backend=args.replace_telemetry_backend,
+        )
         rc |= sub_rc
         if result is not None and telos_config_path in result.changed_files:
             config_changed = True
         if result is not None and not args.status:
-            _, trace_changed = enable_harness_trace(name)
+            model_span_source = {
+                "codex": "gateway",
+                "deepseek-harness": "adapter",
+            }.get(name)
+            _, trace_changed = enable_harness_trace(
+                name, model_span_source=model_span_source
+            )
             config_changed |= trace_changed
             print(f"  ▸ local Trace capture enabled for {name}")
 
@@ -300,6 +345,8 @@ def uninstall_main(argv: list[str] | None = None) -> int:
                              f"({', '.join(sorted(INSTALLERS))}); default: every injected harness")
     parser.add_argument("--purge", action="store_true",
                         help="fully remove telos: also stop the gateway, delete ~/.telos and uninstall the telos-sdk package")
+    parser.add_argument("--dsh-profile", default="web", metavar="NAME",
+                        help="DeepSeek Harness profile to unpatch (default: web)")
     parser.add_argument("-y", "--yes", dest="assume_yes", action="store_true",
                         help="skip the confirmation prompt for --purge")
     args = parser.parse_args(argv)
@@ -335,7 +382,9 @@ def uninstall_main(argv: list[str] | None = None) -> int:
     targets: list[str] = []
     skipped: list[str] = []
     for name in requested:
-        if name == "generic" or _is_injected(name, inject_url):
+        if name == "generic" or _is_injected(
+            name, inject_url, dsh_profile=args.dsh_profile
+        ):
             targets.append(name)
         else:
             skipped.append(name)
@@ -357,7 +406,13 @@ def uninstall_main(argv: list[str] | None = None) -> int:
     reverted_any = False
     for name in targets:
         # gateway URL is irrelevant for uninstall; pass an empty placeholder.
-        sub_rc, result = _run_one(name, "", uninstall=True, status=False)
+        sub_rc, result = _run_one(
+            name,
+            "",
+            uninstall=True,
+            status=False,
+            dsh_profile=args.dsh_profile,
+        )
         rc |= sub_rc
         if result is not None and result.changed_files:
             reverted_any = True

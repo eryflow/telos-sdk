@@ -1,6 +1,6 @@
 # ADR-0001：本地 Trace 与按任务类型持续进化
 
-**状态：** Accepted
+**状态：** Superseded by [ADR-0002](./0002-opik-style-agent-tracing-platform.md)
 **日期：** 2026-08-24
 
 ## 背景

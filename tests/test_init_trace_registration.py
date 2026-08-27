@@ -16,12 +16,12 @@ def test_init_and_uninstall_toggle_trace_registration(tmp_path) -> None:
         registered = load_config().trace_harnesses["generic"]
         assert registered["enabled"] is True
         assert registered["capture"] == "full"
-        token = registered["reporter_token"]
+        token = registered["tracing_token"]
 
         assert uninstall_main(["--harness", "generic"]) == 0
         disabled = load_config().trace_harnesses["generic"]
         assert disabled["enabled"] is False
-        assert disabled["reporter_token"] == token
+        assert disabled["tracing_token"] == token
     finally:
         if previous is None:
             os.environ.pop("TELOS_HOME", None)

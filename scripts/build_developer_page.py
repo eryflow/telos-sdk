@@ -515,8 +515,12 @@ def render_developer(
 <style>{CSS}</style>
 </head><body>
 <div class="wrap">
+<nav class="tabs" aria-label="Dashboard views">
+  <a href="/__telos/dashboard">Savings</a>
+  <a class="active" href="/__telos/developer">Trace</a>
+</nav>
 <header>
-  <h1>TELOS · developer inspector</h1>
+  <h1>TELOS · Trace inspector</h1>
   <div class="sub">
     {len(inspector)} session(s) tracked · {len(registry)} bridge state(s) ·
     {html.escape(title)} · generated {ts_now}{refresh_note}

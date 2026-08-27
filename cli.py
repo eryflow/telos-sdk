@@ -14,7 +14,7 @@ Subcommands:
 - ``telos alias``         set the harness the bare ``telos`` enters by default
 - ``telos replay``        replay a recorded session across multiple modes for comparison
 - ``telos evolve``        configure offline self-evolution for a task type
-- ``telos report``        append a Harness lifecycle event (used by hooks)
+- ``telos trace-hook``    internal tracing hook runner installed into Harnesses
 - ``telos proxy``         (hidden alias) run the gateway blocking in the foreground, equivalent to the old telos proxy
 """
 
@@ -80,9 +80,12 @@ def main(argv: list[str] | None = None) -> int:
     if subcommand == "evolve":
         from telos.evolve import main as evolve_main
         return evolve_main(rest)
-    if subcommand == "report":
-        from telos.reporter import main as reporter_main
-        return reporter_main(rest)
+    if subcommand == "trace-hook":
+        if rest != ["codex"]:
+            print("usage: telos trace-hook codex", file=sys.stderr)
+            return 2
+        from telos.codex_tracing import main as codex_tracing_main
+        return codex_tracing_main([])
     if subcommand == "showcase":
         from telos.scripts.showcase import main as showcase_main
         return showcase_main(rest)
@@ -756,7 +759,6 @@ def _print_usage() -> None:
         "  alias       set the harness the bare telos enters by default\n"
         "  replay      replay a recorded session across multiple modes for a controlled A/B comparison\n"
         "  evolve      configure local offline self-evolution for a task type\n"
-        "  report      append a Harness lifecycle event (for hook adapters)\n"
         "  showcase    offline narrated demo + interactive playground (--interactive / --cast)\n"
         "\n"
         "options:\n"

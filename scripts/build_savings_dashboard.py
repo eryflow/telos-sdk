@@ -547,13 +547,16 @@ header h1 { margin: 0 0 6px 0; font-size: 28px; font-weight: 700;
 .title-lockup { display: inline-flex; align-items: center; gap: 12px; min-width: 0; }
 .title-text { color: #adb6c2; font-size: 18px; font-weight: 500; white-space: nowrap; }
 
-/* ---- reset button ---- */
-.reset-btn {
+/* ---- header actions ---- */
+.header-actions { display: flex; align-items: center; gap: 8px; }
+.reset-btn, .nav-btn {
   flex: none; cursor: pointer; font: inherit; font-size: 12.5px;
   font-weight: 600; color: #adb6c2;
   background: #161b22; border: 1px solid #30363d; border-radius: 8px;
   padding: 8px 14px; transition: all .15s ease; white-space: nowrap;
+  text-decoration: none;
 }
+.nav-btn:hover { color: #79c0ff; border-color: #79c0ff66; }
 .reset-btn:hover:not(:disabled) {
   color: #f85149; border-color: #f8514966; background: #f8514912;
 }
@@ -1125,10 +1128,13 @@ def render_dashboard(
         · generated {ts_now}{refresh_note}
       </div>
     </div>
-    <button class="reset-btn" type="button" onclick="telosReset(this)"
-            title="Clear the usage log and zero this dashboard">
-      ⟲ Reset
-    </button>
+    <div class="header-actions">
+      <a class="nav-btn" href="/__telos/developer">Trace</a>
+      <button class="reset-btn" type="button" onclick="telosReset(this)"
+              title="Clear the usage log and zero this dashboard">
+        ⟲ Reset
+      </button>
+    </div>
   </div>
 </header>
 
@@ -1320,6 +1326,7 @@ def _render_empty(title: str, body: str, *,
     <div class="status-body">{body}</div>
   </div>
 
+  <p class="hint"><a class="nav-btn" href="/__telos/developer">Open Trace</a></p>
   <p class="hint">{refresh_hint}</p>
 
 </div></div></body></html>

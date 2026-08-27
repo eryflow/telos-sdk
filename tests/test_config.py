@@ -138,14 +138,43 @@ def test_harness_trace_registration_is_idempotent() -> None:
     _with_home(_tmp_home())
     first, changed = cfgmod.enable_harness_trace("codex")
     assert changed is True
-    token = first.trace_harnesses["codex"]["reporter_token"]
+    token = first.trace_harnesses["codex"]["tracing_token"]
     second, changed = cfgmod.enable_harness_trace("codex")
     assert changed is False
-    assert second.trace_harnesses["codex"]["reporter_token"] == token
+    assert second.trace_harnesses["codex"]["tracing_token"] == token
     disabled, changed = cfgmod.disable_harness_trace("codex")
     assert changed is True
     assert disabled.trace_harnesses["codex"]["enabled"] is False
-    assert disabled.trace_harnesses["codex"]["reporter_token"] == token
+    assert disabled.trace_harnesses["codex"]["tracing_token"] == token
+
+
+def test_legacy_reporter_token_is_migrated_in_memory() -> None:
+    home = _tmp_home()
+    _with_home(home)
+    (home / "config.json").write_text(json.dumps({
+        "trace_harnesses": {
+            "codex": {"enabled": True, "reporter_token": "legacy-secret"},
+        },
+    }))
+    policy = cfgmod.load_config().trace_harnesses["codex"]
+    assert policy["tracing_token"] == "legacy-secret"
+    assert "reporter_token" not in policy
+
+
+def test_harness_trace_selects_one_model_span_source() -> None:
+    _with_home(_tmp_home())
+    cfg, changed = cfgmod.enable_harness_trace(
+        "codex", model_span_source="gateway"
+    )
+    assert changed is True
+    assert cfg.trace_harnesses["codex"]["model_span_source"] == "gateway"
+
+    try:
+        cfgmod.enable_harness_trace("codex", model_span_source="both")
+    except ValueError as exc:
+        assert "model_span_source" in str(exc)
+    else:
+        raise AssertionError("invalid model_span_source was accepted")
 
 
 def test_evolution_task_policy_is_idempotent() -> None:

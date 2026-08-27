@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 
+from telos.corpus import record_call
 from telos.output_filter import TelosMode
 from telos.replay import replay_session
+from telos.replay.__main__ import main as replay_main
 from telos.scripts.build_savings_dashboard import aggregate
 
 
@@ -173,6 +175,29 @@ def test_replay_retryable_classification() -> None:
     assert not _is_retryable(_Status(404))
     assert not _is_retryable(ValueError("boom"))
     print("✓ test_replay_retryable_classification")
+
+
+def test_replay_show_opens_responses_session_without_api_key(tmp_path, capsys) -> None:
+    request = {
+        "model": "gpt-5.6-sol",
+        "input": [{"role": "user", "content": "TELOS_TRACE_OK"}],
+        "tools": [{"type": "function"}],
+        "stream": True,
+    }
+    record_call(tmp_path, "hermes-1", 7, request, ts=123.0)
+
+    assert replay_main([
+        "--corpus-dir", str(tmp_path), "--session", "hermes-1", "--show",
+    ]) == 0
+    shown = capsys.readouterr().out
+    assert "openai-responses" in shown
+    assert "TELOS_TRACE_OK" in shown
+    assert "call_index=7" in shown
+
+    assert replay_main([
+        "--corpus-dir", str(tmp_path), "--session", "hermes-1",
+    ]) == 2
+    assert "cannot be re-executed yet" in capsys.readouterr().err
 
 
 def main() -> None:
