@@ -489,7 +489,7 @@ class ProxyApp:
         # "rewrite fails → original command" principle as RTK).
         # strict=True: for testing / debugging, a TELOS failure returns 500 directly.
         self.strict = strict
-        # The meta-refresh interval (seconds) of /__telos/dashboard; 0 = disable auto-refresh.
+        # The meta-refresh interval (seconds) of /dashboard; 0 = disable auto-refresh.
         self.dashboard_refresh = dashboard_refresh
 
         if usage_log is not None:
@@ -1139,7 +1139,7 @@ class ProxyApp:
                 usage["output_tokens"] = int(u["output_tokens"])
 
     # ------------------------------------------------------------------
-    # GET /__telos/dashboard —— live savings dashboard
+    # GET /dashboard —— live savings dashboard
     # ------------------------------------------------------------------
 
     async def handle_dashboard(self, request: web.Request) -> web.Response:
@@ -2462,6 +2462,7 @@ def make_app(
         "*", "/upstreams/{slug}/{tail:.*}", proxy.handle_upstream_route,
     )
     # Must be registered before the catch-all passthrough, otherwise it gets swallowed.
+    app.router.add_get("/dashboard", proxy.handle_dashboard)
     app.router.add_get("/__telos/dashboard", proxy.handle_dashboard)
     app.router.add_route("GET", "/__telos/control/mode", proxy.handle_control_mode)
     app.router.add_route("POST", "/__telos/control/mode", proxy.handle_control_mode)
@@ -2536,10 +2537,10 @@ def run(
                   corpus_dir)
     if usage_log:
         _log.info("usage log    → %s", usage_log)
-        _log.info("dashboard    → http://%s:%d/__telos/dashboard"
+        _log.info("dashboard    → http://%s:%d/dashboard"
                   " (refresh=%ds)", host, port, dashboard_refresh)
     else:
-        _log.info("dashboard    → http://%s:%d/__telos/dashboard"
+        _log.info("dashboard    → http://%s:%d/dashboard"
                   " (no usage_log; will show empty state)", host, port)
     _log.info("developer    → http://%s:%d/__telos/developer"
               " (live session inspector; JSON at /__telos/developer.json)",

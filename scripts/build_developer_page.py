@@ -516,7 +516,7 @@ def render_developer(
 </head><body>
 <div class="wrap">
 <nav class="tabs" aria-label="Dashboard views">
-  <a href="/__telos/dashboard">Savings</a>
+  <a href="/dashboard">Savings</a>
   <a class="active" href="/__telos/developer">Trace</a>
 </nav>
 <header>

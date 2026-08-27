@@ -45,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
                              "persist it to disk.")
     parser.add_argument("--dashboard-refresh", type=int, default=5,
                         metavar="SECONDS",
-                        help="meta-refresh interval for GET /__telos/dashboard, "
+                        help="meta-refresh interval for GET /dashboard, "
                              "0 = disable auto-refresh (default 5 seconds)")
     args = parser.parse_args(argv)
 

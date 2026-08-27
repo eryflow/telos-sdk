@@ -23,7 +23,7 @@ def _control_url(host: str, port: int) -> str:
 
 
 def dashboard_url(host: str, port: int) -> str:
-    return f"http://{host}:{port}/__telos/dashboard"
+    return f"http://{host}:{port}/dashboard"
 
 
 def get_mode(host: str, port: int) -> str:
