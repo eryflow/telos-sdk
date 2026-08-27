@@ -37,12 +37,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--strict", action="store_true",
                         help="return 500 when TELOS fails (default: fall back to passthrough)")
     parser.add_argument("--corpus-dir", type=Path, default=DEFAULT_CORPUS_DIR,
-                        help=f"conversation corpus directory; records raw requests for telos replay "
+                        help=f"legacy raw-request corpus directory "
                              f"(default {DEFAULT_CORPUS_DIR})")
+    parser.add_argument("--record-corpus", action="store_true",
+                        help="also write the legacy raw-request corpus (off by default)")
     parser.add_argument("--no-record", action="store_true",
-                        help="disable session recording (enabled by default). It records the raw request "
-                             "body, including your prompt / code -- use this switch if you'd rather not "
-                             "persist it to disk.")
+                        help=argparse.SUPPRESS)
     parser.add_argument("--dashboard-refresh", type=int, default=5,
                         metavar="SECONDS",
                         help="meta-refresh interval for GET /dashboard, "
@@ -69,7 +69,7 @@ def main(argv: list[str] | None = None) -> int:
         dashboard_refresh=args.dashboard_refresh,
         mode=TelosMode.from_label(args.mode),
         corpus_dir=args.corpus_dir,
-        record=not args.no_record,
+        record=args.record_corpus and not args.no_record,
     )
     return 0
 

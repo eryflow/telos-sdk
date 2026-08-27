@@ -53,6 +53,7 @@ def _make_installer(
     gateway_url: str,
     *,
     dsh_profile: str = "web",
+    dsh_executable: str | None = None,
     replace_telemetry_backend: bool = False,
 ):
     factory = INSTALLERS[name]
@@ -60,6 +61,11 @@ def _make_installer(
         return factory(
             proxy_url=gateway_url,
             profile=dsh_profile,
+            dsh_executable=(
+                dsh_executable
+                or load_config().harness_executables.get(name)
+                or "dsh"
+            ),
             replace_telemetry_backend=replace_telemetry_backend,
         )
     return factory(proxy_url=gateway_url)
@@ -110,6 +116,7 @@ def _run_one(
     uninstall: bool,
     status: bool,
     dsh_profile: str = "web",
+    dsh_executable: str | None = None,
     replace_telemetry_backend: bool = False,
 ) -> tuple[int, InstallResult | None]:
     try:
@@ -117,6 +124,7 @@ def _run_one(
             name,
             gateway_url,
             dsh_profile=dsh_profile,
+            dsh_executable=dsh_executable,
             replace_telemetry_backend=replace_telemetry_backend,
         )
         if status:
@@ -201,6 +209,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--status", action="store_true", help="view only, do not change files")
     parser.add_argument("--dsh-profile", default="web", metavar="NAME",
                         help="DeepSeek Harness profile to patch (default: web)")
+    parser.add_argument("--dsh-executable", default=None, metavar="PATH",
+                        help="DeepSeek Harness CLI path (use when another command named dsh is on PATH)")
     parser.add_argument("--replace-telemetry-backend", action="store_true",
                         help="allow DeepSeek Harness init to disable its existing telemetry backend")
     parser.add_argument("--no-gateway", action="store_true",
@@ -240,6 +250,7 @@ def main(argv: list[str] | None = None) -> int:
             uninstall=False,
             status=args.status,
             dsh_profile=args.dsh_profile,
+            dsh_executable=args.dsh_executable,
             replace_telemetry_backend=args.replace_telemetry_backend,
         )
         rc |= sub_rc
@@ -347,6 +358,8 @@ def uninstall_main(argv: list[str] | None = None) -> int:
                         help="fully remove telos: also stop the gateway, delete ~/.telos and uninstall the telos-sdk package")
     parser.add_argument("--dsh-profile", default="web", metavar="NAME",
                         help="DeepSeek Harness profile to unpatch (default: web)")
+    parser.add_argument("--dsh-executable", default=None, metavar="PATH",
+                        help="DeepSeek Harness CLI path (use when another command named dsh is on PATH)")
     parser.add_argument("-y", "--yes", dest="assume_yes", action="store_true",
                         help="skip the confirmation prompt for --purge")
     args = parser.parse_args(argv)
@@ -412,6 +425,7 @@ def uninstall_main(argv: list[str] | None = None) -> int:
             uninstall=True,
             status=False,
             dsh_profile=args.dsh_profile,
+            dsh_executable=args.dsh_executable,
         )
         rc |= sub_rc
         if result is not None and result.changed_files:

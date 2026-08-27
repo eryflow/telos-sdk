@@ -254,6 +254,62 @@ def test_uninstall_removes_telos_only_fallback_file(tmp_path: Path) -> None:
     assert not hooks_path.exists()
 
 
+def test_installer_registers_native_plugin_and_skips_fallback(tmp_path: Path) -> None:
+    config_path = tmp_path / "codex" / "config.toml"
+    plugin_path = tmp_path / "telos-marketplace" / "telos-tracing"
+    hooks_path = tmp_path / "codex" / "hooks.json"
+    installer = CodexInstaller(
+        config_path=config_path,
+        trace_plugin_path=plugin_path,
+        hooks_path=hooks_path,
+        register_trace_plugin=True,
+    )
+    state = {"marketplace": False, "plugin": False}
+    calls: list[tuple[str, ...]] = []
+
+    def run(arguments: list[str]) -> dict[str, object]:
+        calls.append(tuple(arguments))
+        if arguments[:3] == ["plugin", "marketplace", "list"]:
+            return {"marketplaces": ([{
+                "name": "telos-local",
+                "root": str(plugin_path.parent.resolve()),
+            }] if state["marketplace"] else [])}
+        if arguments[:3] == ["plugin", "marketplace", "add"]:
+            state["marketplace"] = True
+            return {"name": "telos-local"}
+        if arguments[:2] == ["plugin", "list"]:
+            return {"installed": ([{
+                "pluginId": "telos-tracing@telos-local",
+                "enabled": True,
+            }] if state["plugin"] else [])}
+        if arguments[:2] == ["plugin", "add"]:
+            state["plugin"] = True
+            return {"pluginId": "telos-tracing@telos-local"}
+        if arguments[:2] == ["plugin", "remove"]:
+            state["plugin"] = False
+            return {"removed": True}
+        if arguments[:3] == ["plugin", "marketplace", "remove"]:
+            state["marketplace"] = False
+            return {"removed": True}
+        raise AssertionError(arguments)
+
+    installer._run_codex_json = run  # type: ignore[method-assign]
+    result = installer.install()
+
+    assert state == {"marketplace": True, "plugin": True}
+    assert any("registered and enabled" in note for note in result.notes)
+    assert not hooks_path.exists()
+    marketplace = json.loads(
+        installer.trace_marketplace_manifest.read_text(encoding="utf-8")
+    )
+    assert marketplace["plugins"][0]["name"] == "telos-tracing"
+
+    installer.uninstall()
+    assert state == {"marketplace": False, "plugin": False}
+    assert not installer.trace_marketplace_manifest.exists()
+    assert ("plugin", "remove", "telos-tracing@telos-local", "--json") in calls
+
+
 def test_installer_does_not_overwrite_invalid_user_hooks(tmp_path: Path) -> None:
     hooks_path = tmp_path / "hooks.json"
     hooks_path.write_text("{ user-owned invalid json", encoding="utf-8")

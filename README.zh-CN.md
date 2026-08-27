@@ -44,23 +44,16 @@ Prompt Cache 优化仍然是 TELOS 的底层能力，但它现在服务于更完
 flowchart LR
     H["Agent Harness<br/>Codex · DeepSeek Harness · 其他"] --> G["本地 TELOS Gateway"]
     G --> M["你的模型供应商"]
-    G --> C["本地请求 Corpus"]
     H -->|"原生 Hook / Telemetry"| T["Thread → Trace → Span"]
     G -->|"模型 Span"| T
     T --> D[("本地 SQLite")]
-    C --> R["回放与回归样本"]
-    T --> R
+    T --> R["回放与回归样本"]
     R --> E["自动离线评测"]
     E --> O["Prompt · Tool · Workflow · 模型路由候选"]
     O -. "人工发布" .-> H
 ```
 
-TELOS 保存两类互补记录：
-
-1. **Gateway Corpus** 保存模型请求，用于确定性回放与成本对比。
-2. **Tracing 数据库**将 Harness 与模型生命周期保存为可查询的 `Thread → Trace → Span` 树，包括工具、子 Agent、审批、usage、TTFT 与错误。
-
-两者通过 `session_id` 关联为同一份任务历史，同时保留既有 replay 数据格式。
+**Tracing 数据库**是默认的唯一记录：它把 Harness 与模型生命周期保存为可查询的 `Thread → Trace → Span` 树，其中包含可回放的原始 LLM 请求、工具、子 Agent、审批、usage、TTFT 与错误。旧 JSONL corpus 仅作为显式 `--record-corpus` 兼容选项保留。
 
 <a id="what-ships-today"></a>
 
@@ -69,7 +62,7 @@ TELOS 保存两类互补记录：
 | 能力 | 状态 |
 |---|---|
 | 为 Codex、Claude Code、OpenClaw 和 Hermes 注入本地 Gateway | **已可用** |
-| 在本地记录模型请求 Corpus，并跨模式回放会话 | **已可用** |
+| 从 SQLite LLM Span 跨模式回放；兼容可选旧 corpus | **已可用** |
 | SQLite Trace/Span 存储、带鉴权的 batch ingest 与本地 Trace Explorer | **已可用** |
 | Codex 原生 Hook 与 DeepSeek Harness telemetry adapter | **已可用** |
 | `telos evolve --task` 任务类型策略，默认离线评测、人工发布 | **已可用** |
@@ -113,7 +106,7 @@ TELOS 将状态持久化到 `~/.telos/`：
 | 路径 | 内容 |
 |---|---|
 | `config.json` | Gateway、Harness Trace 和进化策略；包含各 Harness 的 tracing token |
-| `corpus/` | 用于回放的原始模型请求 |
+| `corpus/` | 可选旧版原始请求 corpus（仅 `--record-corpus`） |
 | `telos.db` | SQLite projects、threads、traces、spans 与 feedback |
 | `usage.jsonl` | Token 用量与成本指标 |
 
@@ -142,7 +135,15 @@ telos init --harness deepseek-harness --replace-telemetry-backend
 # http://127.0.0.1:7171/__telos/traces
 ```
 
-Adapter 生成稳定 ID 并提交幂等实体快照；Gateway 是唯一的 SQLite writer。
+如果 `PATH` 中优先出现的是另一个同名 `dsh`，请显式指定真正的 DeepSeek Harness CLI。
+对于已经构建的源码 checkout：
+
+```bash
+telos init --harness deepseek-harness --replace-telemetry-backend \
+  --dsh-executable /path/to/deepseek-harness/apps/cli/lib/bin.js
+```
+
+Adapter 生成稳定 ID 并提交幂等实体快照；Gateway 是唯一的 SQLite writer。Codex 安装优先使用原生 plugin manager，旧客户端才回退到不破坏用户配置的 `hooks.json` 合并。
 
 ## 自我进化契约
 

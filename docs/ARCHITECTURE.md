@@ -85,7 +85,7 @@ telos-sdk/                         (Python package name = telos; pyproject maps 
 ├── refpool.py             ref-pool: the "pointer table" for large content, slug freezing
 ├── registry.py            Factory that loads harness / engine by name
 ├── cli.py                 `telos` unified CLI: proxy / init / dashboard / replay
-├── corpus.py              Session corpus: records raw requests for replay
+├── corpus.py              Optional legacy JSONL replay compatibility
 │
 ├── harness/               Layer 1: upstream agent request → TelosIR
 │   ├── base.py            HarnessPlugin ABC
@@ -617,12 +617,12 @@ content forms), and looks up the command hint from the `tool_use` of the previou
 
 ## 11. Recording and Replay Comparison
 
-### 11.1 corpus — The Session Corpus
+### 11.1 LLM spans — The Replay Source
 
-[corpus.py](../corpus.py). By default the proxy records the **raw request** of every call to
-`~/.telos/corpus/<session>.jsonl` (records only requests, not responses — Anthropic is stateless,
-the Nth-turn request already contains all the content of the previous N-1 turns). `--no-record` turns it off, `--corpus-dir`
-changes the directory. Functions: `record_call` / `load_session` / `list_sessions`.
+Replay reads raw requests from `llm` spans in `~/.telos/telos.db` through a read-only SQLite
+connection. The proxy no longer dual-writes JSONL by default. [corpus.py](../corpus.py) remains
+for compatibility: `--record-corpus` opts into writing it and `telos replay --corpus-dir ...`
+reads it explicitly.
 
 ### 11.2 replay — Controlled Replay Comparison
 
@@ -699,10 +699,9 @@ Taking path B (proxy) + `mode=both` as an example:
 ```
 1. The agent sends POST /v1/messages to the proxy
 2. The proxy derives the session_id and fetches the BridgeSessionState
-3. [Recording] record_call writes the raw request into the corpus
-4. Parse the mode (header > sticky > process default) + compare_group
-5. [RTK] mode.rtk → apply_filter shortens tool_result
-6. [TELOS] mode.telos → process_anthropic_request:
+3. Parse the mode (header > sticky > process default) + compare_group
+4. [RTK] mode.rtk → apply_filter shortens tool_result
+5. [TELOS] mode.telos → process_anthropic_request:
      a. _detect_harness → pick the harness (sticky)
      b. harness.parse → TelosIR
      c. Bridge(ir, engine, session_state).emit_with_plan():
@@ -712,10 +711,10 @@ Taking path B (proxy) + `mode=both` as an example:
         - engine.plan_marks → EmitPlan (BP anchor positions)
         - engine.emit → wire (cache_control attached)
      d. Pass through non-TELOS fields
-7. The proxy forwards the wire to the real Anthropic
-8. On receiving the response: side-channel parse of usage
-9. The bridge accumulates cache_creation; writes usage_log + inspector
-10. The response is returned to the agent as-is
+6. The proxy forwards the wire to the real Anthropic
+7. On receiving the response: side-channel parse of usage
+8. The bridge accumulates cache_creation; writes usage_log + inspector
+9. The response is returned to the agent as-is
 ```
 
 ---

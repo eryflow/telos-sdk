@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -249,6 +250,17 @@ class DeepSeekHarnessInstaller(AgentInstaller):
         merged = _compose_effective_rows(base, patch)
         return yaml.safe_dump(merged, sort_keys=False, allow_unicode=True), merged
 
+    def _profile_uses_bundles(self) -> bool:
+        manifest = self.patch_path.with_name("package.json")
+        if not manifest.exists():
+            return False
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            bundles = data.get("dsh", {}).get("profile", {}).get("bundles", [])
+        except (OSError, ValueError, AttributeError):
+            return False
+        return isinstance(bundles, list) and bool(bundles)
+
     @staticmethod
     def _looks_like_legacy_profile_error(message: str) -> bool:
         text = message.lower()
@@ -275,6 +287,14 @@ class DeepSeekHarnessInstaller(AgentInstaller):
         if completed.returncode != 0:
             detail = completed.stderr.strip() or completed.stdout.strip() or "no diagnostic"
             if self._looks_like_legacy_profile_error(detail):
+                if self._profile_uses_bundles():
+                    raise RuntimeError(
+                        f"{self.dsh_executable!r} is not the DeepSeek Harness CLI; "
+                        "the selected profile uses bundle layers and cannot be "
+                        "verified from cordis.yml alone. Pass the real CLI with "
+                        "--dsh-executable (for a source checkout, use its built "
+                        "apps/cli/lib/bin.js)."
+                    )
                 return self._fallback_dump()
             raise RuntimeError(f"`dsh --profile {self.profile} --dump-config` failed: {detail}")
 

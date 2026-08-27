@@ -251,7 +251,7 @@ The two paths are **functionally equivalent** (same TELOS pipeline, same state a
 ### 8.1 Claude Code (most common, three steps)
 
 ```bash
-# ① Start the proxy (default mode=telos, default records sessions to ~/.telos/corpus)
+# ① Start the proxy (default mode=telos; tracing is stored in ~/.telos/telos.db)
 telos gateway start --usage-log ~/.telos/usage.jsonl
 
 # ② One-line integration with Claude Code (patches the env field of ~/.claude/settings.json)
@@ -441,7 +441,7 @@ flowchart TB
 ### 12.1 replay: a recorded session, with the trajectory nailed down
 
 ```bash
-telos replay --list                              # see which sessions are in the corpus
+telos replay --list                              # see replayable sessions in tracing SQLite
 telos replay --session <id>                       # by default runs all 4 modes
 telos dashboard --usage-log ~/.telos/usage.jsonl  # view the resulting savings totals
 ```
@@ -473,7 +473,7 @@ Detailed principles and boundaries: [replay-comparison.md](replay-comparison.md)
 2. **`telos` first, then `both`**. First verify TELOS prefix caching is stable with no anomalies, then layer on RTK, which rewrites tool results.
 3. **The first thing after integration is to look at the dashboard**. `/__telos/dashboard` or `telos dashboard`; confirm `cache_read` is rising and `cache hit%` is reasonable.
 4. **Use replay to decide whether to fully enable a mode**. Don't go by feel —— run a replay once and look at the measured numbers in the A/B panel.
-5. **Let the proxy keep recording sessions** (on by default). The corpus is the fuel for replay and also a regression baseline. Use `--no-record` only if you object to raw prompts being written to disk.
+5. **Treat `~/.telos/telos.db` as sensitive data**. Replay reads raw requests from LLM spans there. Enable `--record-corpus` only for legacy tooling that still needs JSONL.
 6. **Use non-strict in production** (default). On a TELOS failure it automatically degrades to passthrough, so correctness is never affected; `--strict` is only for dev debugging.
 7. **Tune `max_sessions` for long-running / high-concurrency scenarios**. The proxy LRU defaults to a cap of 10000.
 
@@ -634,7 +634,7 @@ telos init codex                    # re-detect auth mode and re-wire
 flowchart LR
   S1["1. Read §1-§5 of this doc<br/>build the mental model"] --> S2["2. pip install -e ."]
   S2 --> S3["3. telos proxy<br/>+ telos init --agent claude-code"]
-  S3 --> S4["4. Use it normally for a few days<br/>let the corpus accumulate naturally"]
+  S3 --> S4["4. Use it normally for a few days<br/>let tracing spans accumulate naturally"]
   S4 --> S5["5. telos dashboard<br/>confirm the cache is hitting"]
   S5 --> S6["6. telos replay --session &lt;id&gt;<br/>run the 4-mode comparison"]
   S6 --> S7{"Fully switch to both?"}

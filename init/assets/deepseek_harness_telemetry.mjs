@@ -36,7 +36,7 @@ function statusForTurn(reason) {
   switch (reason?.kind) {
     case 'aborted': return 'cancelled'
     case 'error': return 'error'
-    case 'interrupted': return 'abandoned'
+    case 'interrupted': return 'cancelled'
     case 'completed':
     case 'blocked':
     case 'max-tokens': return 'ok'
@@ -63,6 +63,8 @@ function newSessionState(timeUs, attributes) {
     step: undefined,
     stepStartUs: undefined,
     llmInput: undefined,
+    llmSequence: undefined,
+    llmStartUs: undefined,
     llmModel: undefined,
     llmProvider: undefined,
     ttftUs: undefined,
@@ -133,7 +135,7 @@ function stepBody(sessionId, state, timeUs, fields = {}) {
 function llmBody(sessionId, state, timeUs, fields = {}) {
   const traceExternalId = `${sessionId}:${state.turn}`
   const stepExternalId = `${traceExternalId}:${state.step}:step`
-  const externalId = `${traceExternalId}:${state.step}:llm`
+  const externalId = `${traceExternalId}:${state.step}:llm:${state.llmSequence}`
   return {
     id: entityId('span', externalId),
     trace_id: entityId('trace', traceExternalId),
@@ -143,7 +145,7 @@ function llmBody(sessionId, state, timeUs, fields = {}) {
     name: 'LLM',
     type: 'llm',
     status: 'running',
-    start_time_us: state.stepStartUs ?? timeUs,
+    start_time_us: state.llmStartUs ?? state.stepStartUs ?? timeUs,
     input: state.llmInput,
     metadata: { turn: state.turn, step: state.step },
     tags: [],
@@ -208,10 +210,17 @@ function mapRecord(record, sessions) {
       state.stepStartUs ??= timeUs
       const detail = record.body || { message: 'agent error' }
       const out = ancestors(sessionId, state, timeUs, state.step !== undefined)
-      if (state.step !== undefined) {
+      for (const callId of state.tools.keys()) {
+        out.push(operation('span', toolBody(sessionId, state, callId, timeUs, {
+          status: 'error', end_time_us: timeUs, error: detail,
+        })))
+      }
+      if (state.step !== undefined && state.llmSequence !== undefined) {
         out.push(operation('span', llmBody(sessionId, state, timeUs, {
           status: 'error', end_time_us: timeUs, error: detail,
         })))
+      }
+      if (state.step !== undefined) {
         out.push(operation('span', stepBody(sessionId, state, timeUs, {
           status: 'error', end_time_us: timeUs, error: detail,
         })))
@@ -225,10 +234,17 @@ function mapRecord(record, sessions) {
     }
     if (op === 'shutdown') {
       const out = ancestors(sessionId, state, timeUs, state.step !== undefined)
-      if (state.step !== undefined) {
+      for (const callId of state.tools.keys()) {
+        out.push(operation('span', toolBody(sessionId, state, callId, timeUs, {
+          status: 'abandoned', end_time_us: timeUs,
+        })))
+      }
+      if (state.step !== undefined && state.llmSequence !== undefined) {
         out.push(operation('span', llmBody(sessionId, state, timeUs, {
           status: 'abandoned', end_time_us: timeUs,
         })))
+      }
+      if (state.step !== undefined) {
         out.push(operation('span', stepBody(sessionId, state, timeUs, {
           status: 'abandoned', end_time_us: timeUs,
         })))
@@ -247,6 +263,13 @@ function mapRecord(record, sessions) {
 
   const type = String(attributes['event.type'] || '')
   const body = record.body || {}
+  if (type === 'agent/error') {
+    return mapRecord({
+      ...record,
+      channel: 'ops',
+      attributes: { ...attributes, 'telemetry.op': 'agent-error' },
+    }, sessions)
+  }
   switch (type) {
     case 'turn/start': {
       state.turn = body.turn
@@ -256,6 +279,8 @@ function mapRecord(record, sessions) {
       state.step = undefined
       state.stepStartUs = undefined
       state.llmInput = undefined
+      state.llmSequence = undefined
+      state.llmStartUs = undefined
       state.llmModel = undefined
       state.llmProvider = undefined
       state.ttftUs = undefined
@@ -275,18 +300,22 @@ function mapRecord(record, sessions) {
       state.step = body.step
       state.stepStartUs = timeUs
       state.llmInput = undefined
+      state.llmSequence = undefined
+      state.llmStartUs = undefined
       state.llmModel = undefined
       state.llmProvider = undefined
       state.ttftUs = undefined
       return [
         ...ancestors(sessionId, state, timeUs),
         operation('span', stepBody(sessionId, state, timeUs)),
-        operation('span', llmBody(sessionId, state, timeUs)),
       ]
     }
     case 'request/header': {
       if (state.turn === undefined || state.step === undefined) return []
       const config = body?.header?.config || {}
+      state.llmSequence = attributes['event.seq']
+      state.llmStartUs = timeUs
+      state.ttftUs = undefined
       state.llmInput = body.header
       state.llmModel = config.model
       state.llmProvider = config.provider
@@ -299,7 +328,8 @@ function mapRecord(record, sessions) {
     }
     case 'assistant/chunk': {
       if (state.turn === undefined || state.step === undefined) return []
-      state.ttftUs ??= Math.max(0, timeUs - (state.stepStartUs ?? timeUs))
+      state.llmSequence ??= attributes['event.seq']
+      state.ttftUs ??= Math.max(0, timeUs - (state.llmStartUs ?? state.stepStartUs ?? timeUs))
       return [
         ...ancestors(sessionId, state, timeUs, true),
         operation('span', llmBody(sessionId, state, timeUs, {
@@ -310,6 +340,7 @@ function mapRecord(record, sessions) {
     case 'assistant/message': {
       state.turn = body.turn
       state.step = body.step
+      state.llmSequence ??= attributes['event.seq']
       const usage = body.usage || {}
       const source = body?.message?.source || {}
       state.lastAssistant = body.message
@@ -372,6 +403,11 @@ function mapRecord(record, sessions) {
       state.step = body.step
       const out = [
         ...ancestors(sessionId, state, timeUs),
+        ...[...state.tools.keys()].map(callId => operation(
+          'span', toolBody(sessionId, state, callId, timeUs, {
+            status: 'abandoned', end_time_us: timeUs,
+          }),
+        )),
         operation('span', stepBody(sessionId, state, timeUs, {
           status: 'ok', end_time_us: timeUs,
         })),
@@ -379,6 +415,8 @@ function mapRecord(record, sessions) {
       state.step = undefined
       state.stepStartUs = undefined
       state.llmInput = undefined
+      state.llmSequence = undefined
+      state.llmStartUs = undefined
       state.llmModel = undefined
       state.llmProvider = undefined
       state.ttftUs = undefined
@@ -397,10 +435,17 @@ function mapRecord(record, sessions) {
           error: errorForTurn(body.reason),
         })),
       ]
-      if (state.step !== undefined) {
+      for (const callId of state.tools.keys()) {
+        out.push(operation('span', toolBody(sessionId, state, callId, timeUs, {
+          status, end_time_us: timeUs, error: errorForTurn(body.reason),
+        })))
+      }
+      if (state.step !== undefined && state.llmSequence !== undefined) {
         out.push(operation('span', llmBody(sessionId, state, timeUs, {
           status, end_time_us: timeUs, error: errorForTurn(body.reason),
         })))
+      }
+      if (state.step !== undefined) {
         out.push(operation('span', stepBody(sessionId, state, timeUs, {
           status, end_time_us: timeUs, error: errorForTurn(body.reason),
         })))
@@ -412,6 +457,8 @@ function mapRecord(record, sessions) {
       state.step = undefined
       state.stepStartUs = undefined
       state.llmInput = undefined
+      state.llmSequence = undefined
+      state.llmStartUs = undefined
       state.llmModel = undefined
       state.llmProvider = undefined
       state.ttftUs = undefined
@@ -569,10 +616,20 @@ export class TelosSessionTelemetryBackend extends SessionTelemetryBackend {
 
   async shutdown() {
     if (this.closed) return
-    this.closed = true
     if (this.retryTimer) clearTimeout(this.retryTimer)
     this.retryTimer = undefined
     if (this.pending) await this.pending
+    if (this.retryTimer) clearTimeout(this.retryTimer)
+    this.retryTimer = undefined
+    const time = Date.now()
+    for (const sessionId of this.sessions.keys()) {
+      this.queue.push({ record: {
+        channel: 'ops', time, severity: 'info',
+        attributes: { 'session.id': sessionId, 'telemetry.op': 'shutdown' },
+        body: {},
+      } })
+    }
+    this.closed = true
     const deadline = Date.now() + this.shutdownTimeoutMs
     await this.drain(deadline)
     if (this.queue.length > 0) {

@@ -7,8 +7,9 @@ import json
 from telos.corpus import record_call
 from telos.output_filter import TelosMode
 from telos.replay import replay_session
-from telos.replay.__main__ import main as replay_main
+from telos.replay.__main__ import load_trace_session, main as replay_main
 from telos.scripts.build_savings_dashboard import aggregate
+from telos.tracing import SQLiteTraceStore
 
 
 def _turns() -> list[dict]:
@@ -198,6 +199,44 @@ def test_replay_show_opens_responses_session_without_api_key(tmp_path, capsys) -
         "--corpus-dir", str(tmp_path), "--session", "hermes-1",
     ]) == 2
     assert "cannot be re-executed yet" in capsys.readouterr().err
+
+
+def test_replay_reads_raw_requests_from_llm_spans_by_default(tmp_path, capsys) -> None:
+    db_path = tmp_path / "telos.db"
+    requests = [turn["request"] for turn in _turns()]
+    operations = [
+        {"entity": "thread", "op": "upsert", "body": {
+            "id": "thread-1", "project_name": "default", "harness": "codex",
+            "external_id": "session-1", "status": "running", "start_time_us": 100,
+        }},
+        {"entity": "trace", "op": "upsert", "body": {
+            "id": "trace-1", "project_name": "default", "thread_id": "thread-1",
+            "harness": "codex", "source": "codex-hook", "external_id": "session-1:turn-1",
+            "name": "turn", "status": "running", "start_time_us": 100,
+            "source_updated_at_us": 100,
+        }},
+        *[
+            {"entity": "span", "op": "upsert", "body": {
+                "id": f"llm-{index}", "trace_id": "trace-1", "source": "gateway",
+                "external_id": f"call-{index}", "name": "LLM", "type": "llm",
+                "status": "ok", "start_time_us": 100 + index,
+                "end_time_us": 200 + index, "input": request,
+                "model": request["model"], "source_updated_at_us": 200 + index,
+            }}
+            for index, request in enumerate(requests, 1)
+        ],
+    ]
+    with SQLiteTraceStore(db_path) as store:
+        store.upsert_batch(operations)
+
+    turns = load_trace_session(db_path, "session-1")
+    assert [turn["request"] for turn in turns] == requests
+    assert replay_main([
+        "--tracing-db", str(db_path), "--session", "session-1", "--show",
+    ]) == 0
+    shown = capsys.readouterr().out
+    assert "2 recorded calls" in shown
+    assert "claude-opus-4-7" in shown
 
 
 def main() -> None:

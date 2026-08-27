@@ -223,16 +223,24 @@ telos <harness>              enter a harness directly (claude-code / codex / ope
 telos alias <harness>        set the harness that bare telos enters by default
 
 telos init [options]
-  --harness {claude-code,codex,openclaw,hermes,generic}
+  --harness {claude-code,codex,deepseek-harness,openclaw,hermes,generic}
                        operate on the specified harness only (default: auto-detect all)
   --gateway-url URL    gateway address (default taken from ~/.telos/config.json)
   --status             view only, don't modify files
+  --dsh-profile NAME   DeepSeek Harness profile to patch (default: web)
+  --dsh-executable PATH
+                       actual DeepSeek Harness CLI when another dsh is on PATH
+  --replace-telemetry-backend
+                       replace the profile's existing telemetry backend
   --no-gateway         only inject config, don't start the gateway automatically
 
 telos uninstall [options]
-  --harness {claude-code,codex,openclaw,hermes,generic}
+  --harness {claude-code,codex,deepseek-harness,openclaw,hermes,generic}
                        restore the pre-install state for a single harness
                        (default: apply to every known harness)
+  --dsh-profile NAME   DeepSeek Harness profile to unpatch (default: web)
+  --dsh-executable PATH
+                       actual DeepSeek Harness CLI when another dsh is on PATH
 
 telos gateway [start|stop|status|restart] [options]
   --host HOST          listen address (default 127.0.0.1)

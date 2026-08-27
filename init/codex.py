@@ -28,6 +28,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -60,6 +61,7 @@ _PROVIDER_NAME_RE = re.compile(r'model_provider\s*=\s*"([^"]+)"')
 
 _TRACE_PLUGIN_VERSION = "1"
 _TRACE_PLUGIN_NAME = "telos-tracing"
+_TRACE_MARKETPLACE_NAME = "telos-local"
 _TRACE_HOOK_COMMAND = "telos trace-hook codex"
 _FALLBACK_DESCRIPTION = "TELOS Codex tracing compatibility hooks."
 
@@ -99,6 +101,18 @@ def _trace_plugin_files() -> dict[Path, str]:
             hook_file, ensure_ascii=False, indent=2
         ) + "\n",
     }
+
+
+def _trace_marketplace_manifest(plugin_path: Path) -> str:
+    return json.dumps({
+        "name": _TRACE_MARKETPLACE_NAME,
+        "plugins": [{
+            "name": _TRACE_PLUGIN_NAME,
+            "source": {"source": "local", "path": f"./{plugin_path.name}"},
+            "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+            "category": "Engineering",
+        }],
+    }, ensure_ascii=False, indent=2) + "\n"
 
 
 def _write_if_changed(path: Path, text: str) -> bool:
@@ -374,6 +388,8 @@ class CodexInstaller(AgentInstaller):
         auth_json_path: Path | None = None,
         trace_plugin_path: Path | None = None,
         hooks_path: Path | None = None,
+        codex_executable: str = "codex",
+        register_trace_plugin: bool | None = None,
     ) -> None:
         super().__init__(proxy_url=proxy_url)
         using_default_config = config_path is None
@@ -390,6 +406,97 @@ class CodexInstaller(AgentInstaller):
             else self.config_path.parent / ".telos-tracing-plugin"
         )
         self.hooks_path = hooks_path or self.config_path.parent / "hooks.json"
+        self.codex_executable = codex_executable
+        self.register_trace_plugin = (
+            using_default_config
+            if register_trace_plugin is None
+            else register_trace_plugin
+        )
+        self.trace_marketplace_path = self.trace_plugin_path.parent
+        self.trace_marketplace_manifest = (
+            self.trace_marketplace_path / ".agents/plugins/marketplace.json"
+        )
+
+    def _run_codex_json(self, arguments: list[str]) -> dict[str, object]:
+        try:
+            completed = subprocess.run(
+                [self.codex_executable, *arguments],
+                text=True,
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError(f"Codex plugin command failed: {exc}") from exc
+        if completed.returncode != 0:
+            detail = completed.stderr.strip() or completed.stdout.strip() or "no diagnostic"
+            raise RuntimeError(f"Codex plugin command failed: {detail}")
+        try:
+            value = json.loads(completed.stdout)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("Codex plugin command returned invalid JSON") from exc
+        if not isinstance(value, dict):
+            raise RuntimeError("Codex plugin command returned a non-object")
+        return value
+
+    def _register_trace_plugin(self, result: InstallResult) -> bool:
+        if not self.register_trace_plugin:
+            return False
+        marketplace_text = _trace_marketplace_manifest(self.trace_plugin_path)
+        if _write_if_changed(self.trace_marketplace_manifest, marketplace_text):
+            result.changed_files.append(self.trace_marketplace_manifest)
+        try:
+            marketplaces = self._run_codex_json([
+                "plugin", "marketplace", "list", "--json",
+            ]).get("marketplaces", [])
+            own = next(
+                (item for item in marketplaces
+                 if isinstance(item, dict) and item.get("name") == _TRACE_MARKETPLACE_NAME),
+                None,
+            )
+            root = str(self.trace_marketplace_path.resolve())
+            if own is not None and str(own.get("root")) != root:
+                raise RuntimeError(
+                    f"Codex marketplace {_TRACE_MARKETPLACE_NAME!r} already points to "
+                    f"{own.get('root')!r}"
+                )
+            if own is None:
+                self._run_codex_json([
+                    "plugin", "marketplace", "add", root, "--json",
+                ])
+
+            installed = self._run_codex_json([
+                "plugin", "list", "--json",
+            ]).get("installed", [])
+            plugin_id = f"{_TRACE_PLUGIN_NAME}@{_TRACE_MARKETPLACE_NAME}"
+            if not any(
+                isinstance(item, dict)
+                and item.get("pluginId") == plugin_id
+                and item.get("enabled") is True
+                for item in installed
+            ):
+                self._run_codex_json([
+                    "plugin", "add", plugin_id, "--json",
+                ])
+            verified = self._run_codex_json([
+                "plugin", "list", "--json",
+            ]).get("installed", [])
+            if not any(
+                isinstance(item, dict)
+                and item.get("pluginId") == plugin_id
+                and item.get("enabled") is True
+                for item in verified
+            ):
+                raise RuntimeError("Codex did not report the TELOS plugin as enabled")
+        except RuntimeError as error:
+            result.notes.append(
+                f"native Codex plugin registration unavailable ({error}); using hooks.json compatibility mode"
+            )
+            return False
+        result.notes.append(
+            f"registered and enabled Codex plugin {plugin_id}"
+        )
+        return True
 
     def _install_trace_plugin(self, result: InstallResult) -> bool:
         changed = False
@@ -401,10 +508,6 @@ class CodexInstaller(AgentInstaller):
         result.notes.append(
             f"prepared Codex tracing plugin bundle v{_TRACE_PLUGIN_VERSION} at "
             f"{self.trace_plugin_path}"
-        )
-        result.notes.append(
-            "Codex local-plugin registration has no stable non-interactive CLI; "
-            "the bundle is retained for native registration when that API stabilizes"
         )
         return changed
 
@@ -440,6 +543,34 @@ class CodexInstaller(AgentInstaller):
         return changed
 
     def _uninstall_trace_plugin(self, result: InstallResult) -> None:
+        if self.register_trace_plugin:
+            plugin_id = f"{_TRACE_PLUGIN_NAME}@{_TRACE_MARKETPLACE_NAME}"
+            try:
+                installed = self._run_codex_json([
+                    "plugin", "list", "--json",
+                ]).get("installed", [])
+                if any(
+                    isinstance(item, dict) and item.get("pluginId") == plugin_id
+                    for item in installed
+                ):
+                    self._run_codex_json([
+                        "plugin", "remove", plugin_id, "--json",
+                    ])
+                marketplaces = self._run_codex_json([
+                    "plugin", "marketplace", "list", "--json",
+                ]).get("marketplaces", [])
+                if any(
+                    isinstance(item, dict)
+                    and item.get("name") == _TRACE_MARKETPLACE_NAME
+                    and str(item.get("root")) == str(self.trace_marketplace_path.resolve())
+                    for item in marketplaces
+                ):
+                    self._run_codex_json([
+                        "plugin", "marketplace", "remove",
+                        _TRACE_MARKETPLACE_NAME, "--json",
+                    ])
+            except RuntimeError as error:
+                result.notes.append(f"could not unregister native Codex plugin: {error}")
         for relative_path in _trace_plugin_files():
             path = self.trace_plugin_path / relative_path
             try:
@@ -452,6 +583,20 @@ class CodexInstaller(AgentInstaller):
             self.trace_plugin_path / ".codex-plugin",
             self.trace_plugin_path / "hooks",
             self.trace_plugin_path,
+        ):
+            try:
+                path.rmdir()
+            except (FileNotFoundError, OSError):
+                pass
+        try:
+            if self.trace_marketplace_manifest.read_text(encoding="utf-8") == _trace_marketplace_manifest(self.trace_plugin_path):
+                self.trace_marketplace_manifest.unlink()
+                result.changed_files.append(self.trace_marketplace_manifest)
+        except FileNotFoundError:
+            pass
+        for path in (
+            self.trace_marketplace_manifest.parent,
+            self.trace_marketplace_manifest.parent.parent,
         ):
             try:
                 path.rmdir()
@@ -643,7 +788,11 @@ class CodexInstaller(AgentInstaller):
 
         result = InstallResult(agent=self.name, action="install")
         tracing_changed = self._install_trace_plugin(result)
-        tracing_changed |= self._install_hook_fallback(result)
+        native_plugin = self._register_trace_plugin(result)
+        if native_plugin:
+            self._uninstall_hook_fallback(result)
+        else:
+            tracing_changed |= self._install_hook_fallback(result)
         # For chatgpt mode, the gateway also needs the matching upstream slug.
         # Do this even if config.toml is already current, so a fresh `telos
         # init codex` on a machine that lost ~/.telos/config.json self-heals.

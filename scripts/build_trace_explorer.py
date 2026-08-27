@@ -35,7 +35,7 @@ _HTML = r'''<!doctype html>
   <input id="search" type="search" placeholder="Search traces" aria-label="Search traces">
   <select id="project" aria-label="Project"><option value="">All projects</option></select>
   <select id="harness" aria-label="Harness"><option value="">All harnesses</option><option>codex</option><option>deepseek-harness</option></select>
-  <select id="status" aria-label="Status"><option value="">All statuses</option><option>running</option><option>ok</option><option>error</option><option>cancelled</option></select>
+  <select id="status" aria-label="Status"><option value="">All statuses</option><option>running</option><option>ok</option><option>error</option><option>cancelled</option><option>abandoned</option><option>unknown</option></select>
   <input id="model" placeholder="Exact model" aria-label="Model">
   <input id="from" type="datetime-local" aria-label="Started after">
   <input id="to" type="datetime-local" aria-label="Started before">

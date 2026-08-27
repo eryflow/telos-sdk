@@ -48,7 +48,7 @@ async def _start_upstream(mock: _MockUpstream) -> tuple[web.AppRunner, str]:
 async def _start_proxy(
     upstream_url: str, *, usage_log: Path | None = None,
     mode: TelosMode | None = None, corpus_dir: Path | None = None,
-    record: bool = True,
+    record: bool = False,
 ) -> tuple[web.AppRunner, str]:
     app = make_app(upstream=upstream_url, usage_log=usage_log, mode=mode,
                    corpus_dir=corpus_dir, record=record)
@@ -228,10 +228,10 @@ async def _test_mode_is_sticky_per_session() -> None:
 
 
 async def _test_proxy_records_corpus(corpus_dir: Path) -> None:
-    """The proxy records the original request into the corpus by default; replay can load it back afterward."""
+    """Legacy corpus recording remains available as an explicit compatibility option."""
     mock = _MockUpstream()
     up_runner, up_url = await _start_upstream(mock)
-    px_runner, px_url = await _start_proxy(up_url, corpus_dir=corpus_dir)
+    px_runner, px_url = await _start_proxy(up_url, corpus_dir=corpus_dir, record=True)
     try:
         async with aiohttp.ClientSession() as client:
             for _ in range(2):
@@ -256,8 +256,7 @@ async def _test_proxy_records_corpus(corpus_dir: Path) -> None:
 async def _test_no_record_disables_corpus(corpus_dir: Path) -> None:
     mock = _MockUpstream()
     up_runner, up_url = await _start_upstream(mock)
-    px_runner, px_url = await _start_proxy(up_url, corpus_dir=corpus_dir,
-                                           record=False)
+    px_runner, px_url = await _start_proxy(up_url, corpus_dir=corpus_dir)
     try:
         async with aiohttp.ClientSession() as client:
             async with client.post(
@@ -266,7 +265,7 @@ async def _test_no_record_disables_corpus(corpus_dir: Path) -> None:
             ) as resp:
                 assert resp.status == 200
         assert not (corpus_dir / "norecord-test.jsonl").exists(), \
-            "should not write the corpus when --no-record is set"
+            "the default must not dual-write the legacy corpus"
         print("✓ test_no_record_disables_corpus")
     finally:
         await px_runner.cleanup()

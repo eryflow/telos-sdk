@@ -454,7 +454,7 @@ class ProxyApp:
         dashboard_refresh: int = 5,
         mode: TelosMode | None = None,
         corpus_dir: Path | None = None,
-        record: bool = True,
+        record: bool = False,
         tracing_db: Path | None = None,
         trace_harnesses: Mapping[str, Mapping[str, Any]] | None = None,
     ):
@@ -472,9 +472,7 @@ class ProxyApp:
         # Tool-result filter: uses rtk if the rtk binary is available, otherwise a pure
         # Python fallback. Constructed once, reused across all sessions (stateless).
         self._filter = build_filter()
-        # Session recording: enabled by default, records each call's raw request into
-        # corpus_dir for `telos replay` to replay. Records the request only, not the
-        # response. Can be turned off with --no-record.
+        # Legacy corpus recording is opt-in; replay reads tracing LLM spans by default.
         self._record = record
         self._corpus_dir = corpus_dir if record else None
         self._tracing_store = (
@@ -652,39 +650,40 @@ class ProxyApp:
             or policy.get("model_span_source") != "gateway"
         ):
             return None
-        started = time.time_ns() // 1_000
-        trace = store.find_active_trace(harness, session_id)
-        if trace is None:
-            synthetic_key = str(uuid4())
-            trace = store.ensure_synthetic_trace(
-                harness=harness,
-                thread_external_id=session_id,
-                trace_external_id=synthetic_key,
-                input=raw,
-                start_time_us=started,
-            )
-        span_id = str(uuid4())
-        body = {
-            "id": span_id,
-            "trace_id": trace["id"],
-            "source": "gateway",
-            "external_id": span_id,
-            "name": model or "model response",
-            "type": "llm",
-            "status": "running",
-            "start_time_us": started,
-            "input": dict(raw),
-            "metadata": {
-                "protocol": "openai-responses",
-                "route": route,
-                "streaming": streaming,
-            },
-            "model": model or None,
-            "provider": provider,
-            "source_updated_at_us": started,
-        }
         try:
+            started = time.time_ns() // 1_000
+            trace = store.find_active_trace(harness, session_id)
+            if trace is None:
+                trace = store.ensure_synthetic_trace(
+                    harness=harness,
+                    thread_external_id=session_id,
+                    trace_external_id=str(uuid4()),
+                    input=raw,
+                    start_time_us=started,
+                )
+            span_id = str(uuid4())
+            body = {
+                "id": span_id,
+                "trace_id": trace["id"],
+                "source": "gateway",
+                "external_id": span_id,
+                "name": model or "model response",
+                "type": "llm",
+                "status": "running",
+                "start_time_us": started,
+                "input": dict(raw),
+                "metadata": {
+                    "protocol": "openai-responses",
+                    "route": route,
+                    "streaming": streaming,
+                },
+                "model": model or None,
+                "provider": provider,
+                "source_updated_at_us": started,
+            }
             store.upsert_span(body)
+            if (trace.get("metadata") or {}).get("synthetic") is True:
+                body["_synthetic_trace"] = trace
         except Exception:  # noqa: BLE001
             _log.exception("model Trace start failed")
             return None
@@ -718,6 +717,7 @@ class ProxyApp:
             )
         except Exception:  # noqa: BLE001
             _log.debug("model Trace cost estimation failed", exc_info=True)
+        synthetic_trace = handle.get("_synthetic_trace")
         body = {
             **handle,
             "status": status,
@@ -735,8 +735,24 @@ class ProxyApp:
             "metadata": {**handle["metadata"], "http_status": http_status},
             "source_updated_at_us": finished,
         }
+        body.pop("_synthetic_trace", None)
         try:
-            self._tracing_store.upsert_span(body)
+            if isinstance(synthetic_trace, dict):
+                self._tracing_store.upsert_batch([
+                    {"entity": "span", "body": body},
+                    {"entity": "trace", "body": {
+                        **synthetic_trace,
+                        "status": status,
+                        "end_time_us": max(
+                            finished, int(synthetic_trace["start_time_us"])
+                        ),
+                        "output": output,
+                        "error": error,
+                        "source_updated_at_us": finished,
+                    }},
+                ])
+            else:
+                self._tracing_store.upsert_span(body)
         except Exception:  # noqa: BLE001
             _log.exception("model Trace finish failed")
 
@@ -2425,7 +2441,7 @@ def make_app(
     dashboard_refresh: int = 5,
     mode: TelosMode | None = None,
     corpus_dir: Path | None = None,
-    record: bool = True,
+    record: bool = False,
     tracing_db: Path | None = None,
     trace_harnesses: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> web.Application:
@@ -2503,7 +2519,7 @@ def run(
     dashboard_refresh: int = 5,
     mode: TelosMode | None = None,
     corpus_dir: Path | None = None,
-    record: bool = True,
+    record: bool = False,
     tracing_db: Path | None = None,
     trace_harnesses: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> None:
@@ -2533,7 +2549,7 @@ def run(
     _log.info("default mode  → %s (telos=%s rtk=%s); a single request can override with X-Telos-Mode",
               mode.label, mode.telos, mode.rtk)
     if record and corpus_dir is not None:
-        _log.info("session corpus → %s (records raw requests for telos replay; --no-record to disable)",
+        _log.info("legacy session corpus → %s (--record-corpus enabled)",
                   corpus_dir)
     if usage_log:
         _log.info("usage log    → %s", usage_log)

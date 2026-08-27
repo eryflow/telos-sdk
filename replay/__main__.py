@@ -1,12 +1,12 @@
 """``python -m telos.replay`` / ``telos replay`` entry point.
 
-Replays a real session from the corpus once for each of several modes. Results
+Replays a real session from tracing LLM spans once for each of several modes. Results
 are appended to usage_log with comparison metadata (compare_group = the original
 session id) so replay/showcase tooling can analyze modes side by side.
 
 Usage::
 
-    telos replay --list                       # list the sessions in the corpus
+    telos replay --list                       # list sessions with replayable LLM spans
     telos replay --session telos-ab12cd34      # run all 4 modes by default
     telos replay --session <id> --modes none,both
     telos replay --session <id> --cast         # record the dashboard changing
@@ -17,12 +17,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
 
 from telos.cast import CastRecorder
+from telos.config import telos_home
 from telos.corpus import (DEFAULT_CORPUS_DIR, display_session, list_sessions,
                           load_session)
 from telos.output_filter import MODE_LABELS, TelosMode, build_filter
@@ -33,21 +35,81 @@ _DEFAULT_USAGE_LOG = Path.home() / ".telos" / "usage.jsonl"
 _DEFAULT_CAST = Path.home() / ".telos" / "replay-cast.cast"
 
 
-def _print_sessions(corpus_dir: Path) -> int:
-    infos = list_sessions(corpus_dir)
-    if not infos:
-        print(f"corpus is empty: {corpus_dir}")
-        print("(run a few real sessions with `telos proxy` first; they are recorded by default)")
+def load_trace_session(db_path: Path, session_id: str) -> list[dict]:
+    """Read raw model requests from LLM spans without opening SQLite for writes."""
+    if not db_path.is_file():
+        raise FileNotFoundError(f"tracing database not found: {db_path}")
+    with sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True) as db:
+        thread = db.execute(
+            """SELECT id FROM threads WHERE id=? OR external_id=?
+               ORDER BY last_updated_at_us DESC LIMIT 1""",
+            (session_id, session_id),
+        ).fetchone()
+        if thread is None:
+            raise FileNotFoundError(f"tracing session not found: {session_id}")
+        rows = db.execute(
+            """SELECT s.id,t.id,s.start_time_us,s.model,s.input_json
+               FROM spans s JOIN traces t ON t.id=s.trace_id
+               WHERE t.thread_id=? AND s.type='llm' AND s.input_json IS NOT NULL
+               ORDER BY s.start_time_us,s.id""",
+            (thread[0],),
+        ).fetchall()
+    turns = []
+    for index, (span_id, trace_id, start_us, model, input_json) in enumerate(rows, 1):
+        request = json.loads(input_json)
+        if not isinstance(request, dict):
+            continue
+        if model and "model" not in request:
+            request["model"] = model
+        turns.append({
+            "call_index": index,
+            "ts": start_us / 1_000_000,
+            "trace_id": trace_id,
+            "span_id": span_id,
+            "request": request,
+        })
+    return turns
+
+
+def _list_trace_sessions(db_path: Path) -> list[dict]:
+    if not db_path.is_file():
+        return []
+    with sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True) as db:
+        rows = db.execute(
+            """SELECT th.id,th.external_id,th.harness,COUNT(s.id),MAX(s.start_time_us)
+               FROM threads th
+               JOIN traces t ON t.thread_id=th.id
+               JOIN spans s ON s.trace_id=t.id AND s.type='llm' AND s.input_json IS NOT NULL
+               GROUP BY th.id,th.external_id,th.harness
+               ORDER BY MAX(s.start_time_us) DESC"""
+        ).fetchall()
+    return [
+        {"id": row[0], "session_id": row[1], "harness": row[2],
+         "n_calls": row[3], "last_ts": row[4] / 1_000_000}
+        for row in rows
+    ]
+
+
+def _print_sessions(tracing_db: Path, corpus_dir: Path | None) -> int:
+    if corpus_dir is not None:
+        infos = list_sessions(corpus_dir)
+        source = f"legacy corpus {corpus_dir}"
+        rows = [{"session_id": i.session_id, "n_calls": i.n_calls,
+                 "last_ts": i.last_ts, "harness": "legacy"} for i in infos]
+    else:
+        rows = _list_trace_sessions(tracing_db)
+        source = f"tracing database {tracing_db}"
+    if not rows:
+        print(f"no replayable LLM spans in {source}")
         return 0
-    print(f"corpus {corpus_dir} —— {len(infos)} sessions:\n")
-    print(f"  {'session':<40} {'calls':>6}  {'last_seen':<16}  handle")
-    for i in infos:
-        last = datetime.fromtimestamp(i.last_ts).strftime("%Y-%m-%d %H:%M") \
-            if i.last_ts else "—"
-        print(f"  {display_session(i.session_id):<40} {i.n_calls:>6}  "
-              f"{last:<16}  {i.handle}")
+    print(f"{source} —— {len(rows)} sessions:\n")
+    print(f"  {'session':<40} {'calls':>6}  {'last_seen':<16}  harness")
+    for row in rows:
+        last = datetime.fromtimestamp(row["last_ts"]).strftime("%Y-%m-%d %H:%M") \
+            if row["last_ts"] else "—"
+        print(f"  {display_session(row['session_id']):<40} {row['n_calls']:>6}  "
+              f"{last:<16}  {row['harness']}")
     print("\nreplay one:  telos replay --session <session>")
-    print("  (the 'session' or 'handle' value above — either resolves)")
     return 0
 
 
@@ -155,10 +217,12 @@ def main(argv: list[str] | None = None) -> int:
         description="Record → replay comparison: run the same session once for each "
                     "of several modes and append comparison-tagged usage records.",
     )
-    ap.add_argument("--corpus-dir", type=Path, default=DEFAULT_CORPUS_DIR,
-                    help=f"session corpus directory (default {DEFAULT_CORPUS_DIR})")
+    ap.add_argument("--tracing-db", type=Path, default=None,
+                    help="SQLite tracing database (default $TELOS_HOME/telos.db)")
+    ap.add_argument("--corpus-dir", type=Path, default=None,
+                    help=f"read the legacy corpus instead (usually {DEFAULT_CORPUS_DIR})")
     ap.add_argument("--list", action="store_true",
-                    help="list the sessions in the corpus and exit")
+                    help="list sessions with replayable LLM spans and exit")
     ap.add_argument("--session", default=None,
                     help="the session id to replay (see --list)")
     ap.add_argument("--show", action="store_true",
@@ -181,17 +245,22 @@ def main(argv: list[str] | None = None) -> int:
                     help="record an asciinema cast of the savings dashboard updating "
                          f"as replay runs (default path: {_DEFAULT_CAST})")
     args = ap.parse_args(argv)
+    tracing_db = args.tracing_db or telos_home() / "telos.db"
 
     if args.list:
-        return _print_sessions(args.corpus_dir)
+        return _print_sessions(tracing_db, args.corpus_dir)
 
     if not args.session:
         print("--session <id> is required (or use --list to view available sessions)", file=sys.stderr)
         return 2
 
     try:
-        turns = load_session(args.corpus_dir, args.session)
-    except FileNotFoundError as e:
+        turns = (
+            load_session(args.corpus_dir, args.session)
+            if args.corpus_dir is not None
+            else load_trace_session(tracing_db, args.session)
+        )
+    except (FileNotFoundError, sqlite3.DatabaseError, json.JSONDecodeError) as e:
         print(str(e), file=sys.stderr)
         return 1
     if not turns:

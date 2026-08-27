@@ -142,6 +142,23 @@ def test_parent_validation_batch_rollback_and_queries(tmp_path) -> None:
         assert store.get_thread("thread-1")["traces"][0]["id"] == "trace-1"
 
 
+def test_list_searches_trace_input_and_output(tmp_path) -> None:
+    with SQLiteTraceStore(tmp_path / "trace.db") as store:
+        _thread(store)
+        store.upsert_trace({
+            **_trace(store),
+            "input": {"content": [{"text": "TELOS_DSH_E2E_20260827"}]},
+            "output": {"answer": "EXPECTED_TOOL_ERROR_RECOVERED"},
+        })
+
+        assert [item["id"] for item in store.list_traces(
+            search="TELOS_DSH_E2E_20260827",
+        )["items"]] == ["trace-1"]
+        assert [item["id"] for item in store.list_traces(
+            search="EXPECTED_TOOL_ERROR_RECOVERED",
+        )["items"]] == ["trace-1"]
+
+
 def test_find_active_synthetic_feedback_and_pragmas(tmp_path) -> None:
     path = tmp_path / "trace.db"
     with SQLiteTraceStore(path) as store:

@@ -44,23 +44,16 @@ Prompt-cache optimization remains part of TELOS. It is now one runtime primitive
 flowchart LR
     H["Agent harness<br/>Codex · DeepSeek Harness · others"] --> G["Local TELOS gateway"]
     G --> M["Your model provider"]
-    G --> C["Local request corpus"]
     H -->|"native hooks / telemetry"| T["Thread → Trace → Span"]
     G -->|"model spans"| T
     T --> D[("Local SQLite")]
-    C --> R["Replay and regression cases"]
-    T --> R
+    T --> R["Replay and regression cases"]
     R --> E["Offline evaluation"]
     E --> O["Prompt · Tool · Workflow · Model routing candidates"]
     O -. "manual promotion" .-> H
 ```
 
-TELOS keeps two complementary records:
-
-1. The **gateway corpus** stores model requests for deterministic replay and cost comparison.
-2. The **tracing database** stores Harness and model lifecycles as queryable `Thread → Trace → Span` trees, including tools, subagents, approvals, usage, TTFT, and errors.
-
-They are correlated by `session_id` and become one task history without forcing existing replay data into a new format.
+The **tracing database** is the single default record: it stores Harness and model lifecycles as queryable `Thread → Trace → Span` trees, including replayable raw LLM requests, tools, subagents, approvals, usage, TTFT, and errors. The old JSONL corpus remains an explicit `--record-corpus` compatibility option.
 
 <a id="what-ships-today"></a>
 
@@ -69,7 +62,7 @@ They are correlated by `session_id` and become one task history without forcing 
 | Capability | Status |
 |---|---|
 | Inject the local gateway into Codex, Claude Code, OpenClaw, and Hermes | **Available** |
-| Record model-request corpus locally and replay sessions across modes | **Available** |
+| Replay SQLite LLM spans across modes; optional legacy corpus compatibility | **Available** |
 | SQLite Trace/Span store, authenticated batch ingest, and local Trace Explorer | **Available** |
 | Native Codex hooks and DeepSeek Harness telemetry adapters | **Available** |
 | `telos evolve --task` task-type policy with offline evaluation and manual promotion settings | **Available** |
@@ -113,7 +106,7 @@ TELOS persists its state under `~/.telos/`:
 | Path | Contents |
 |---|---|
 | `config.json` | Gateway, Harness Trace, and evolution policies; includes per-Harness tracing tokens |
-| `corpus/` | Raw model requests used for replay |
+| `corpus/` | Optional legacy raw-request corpus (`--record-corpus` only) |
 | `telos.db` | SQLite projects, threads, traces, spans, and feedback |
 | `usage.jsonl` | Token usage and cost metrics |
 
@@ -142,7 +135,15 @@ telos init --harness deepseek-harness --replace-telemetry-backend
 # http://127.0.0.1:7171/__telos/traces
 ```
 
-Adapters generate stable IDs and submit idempotent entity snapshots; the Gateway is the only SQLite writer.
+If another program named `dsh` appears first on `PATH`, point TELOS at the
+actual DeepSeek Harness CLI. For a built source checkout:
+
+```bash
+telos init --harness deepseek-harness --replace-telemetry-backend \
+  --dsh-executable /path/to/deepseek-harness/apps/cli/lib/bin.js
+```
+
+Adapters generate stable IDs and submit idempotent entity snapshots; the Gateway is the only SQLite writer. Codex installation uses its native plugin manager when available and falls back to a non-destructive `hooks.json` merge on older clients.
 
 ## The self-evolution contract
 

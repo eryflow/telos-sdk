@@ -613,9 +613,12 @@ class SQLiteTraceStore:
             where.append("t.start_time_us<=?")
             values.append(_integer(start_time_to_us, "start_time_to_us", minimum=0))
         if search:
-            where.append("(t.name LIKE ? ESCAPE '\\' OR t.external_id LIKE ? ESCAPE '\\')")
+            where.append(
+                "(t.name LIKE ? ESCAPE '\\' OR t.external_id LIKE ? ESCAPE '\\' "
+                "OR t.input_json LIKE ? ESCAPE '\\' OR t.output_json LIKE ? ESCAPE '\\')"
+            )
             escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            values.extend((f"%{escaped}%", f"%{escaped}%"))
+            values.extend((f"%{escaped}%",) * 4)
         if model:
             where.append("EXISTS (SELECT 1 FROM spans sm WHERE sm.trace_id=t.id AND sm.model=?)")
             values.append(model)
