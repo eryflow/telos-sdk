@@ -260,6 +260,7 @@ def main(argv: list[str] | None = None) -> int:
             model_span_source = {
                 "codex": "gateway",
                 "deepseek-harness": "adapter",
+                "kimi-code": "gateway",
             }.get(name)
             _, trace_changed = enable_harness_trace(
                 name, model_span_source=model_span_source

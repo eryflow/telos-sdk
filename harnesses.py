@@ -61,6 +61,13 @@ HARNESS_SPECS: dict[str, HarnessSpec] = {
         injection=_INJECTION_ENV,
         env_var="TELOS_GATEWAY_URL",
     ),
+    "kimi-code": HarnessSpec(
+        name="kimi-code",
+        display_name="Kimi Code",
+        default_executable="kimi",
+        injection=_INJECTION_ENV,
+        env_var="KIMI_CODE_BASE_URL",
+    ),
     "openclaw": HarnessSpec(
         name="openclaw",
         display_name="OpenClaw",
@@ -118,6 +125,8 @@ def _fallback_executable_candidates(spec: HarnessSpec) -> tuple[Path, ...]:
             Path("/Applications/Codex.app/Contents/Resources/codex"),
             Path.home() / "Applications/Codex.app/Contents/Resources/codex",
         )
+    if spec.name == "kimi-code":
+        return (Path.home() / ".kimi-code/bin/kimi",)
     return ()
 
 
@@ -131,4 +140,8 @@ def detect_installed(executables: dict[str, str] | None = None) -> list[HarnessS
 
 def gateway_env(spec: HarnessSpec, base_url: str) -> dict[str, str]:
     """The environment variables required to point a given harness at the gateway."""
+    if spec.name == "kimi-code":
+        # Managed Kimi OAuth rejects credentials when its base URL is overridden.
+        # API-key providers are patched by KimiCodeInstaller instead.
+        return {}
     return {spec.env_var: base_url}

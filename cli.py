@@ -3,7 +3,7 @@
 Subcommands:
 
 - ``telos``               bare command → pick a harness and enter its CLI
-- ``telos <harness>``     directly enter a harness (claude-code / codex / openclaw / hermes)
+- ``telos <harness>``     directly enter a supported harness CLI
 - ``telos init``          auto-detect harnesses → inject → start gateway in background → print dashboard
 - ``telos uninstall``     undo the injection from ``telos init`` (per-harness with ``--harness``; ``--purge`` fully removes telos)
 - ``telos ccswitch``      coexist with cc-switch: ``status`` / ``sync`` (re-chain telos in front of cc-switch's active provider)
@@ -81,11 +81,14 @@ def main(argv: list[str] | None = None) -> int:
         from telos.evolve import main as evolve_main
         return evolve_main(rest)
     if subcommand == "trace-hook":
-        if rest != ["codex"]:
-            print("usage: telos trace-hook codex", file=sys.stderr)
+        if rest == ["codex"]:
+            from telos.codex_tracing import main as tracing_main
+        elif rest == ["kimi-code"]:
+            from telos.kimi_tracing import main as tracing_main
+        else:
+            print("usage: telos trace-hook <codex|kimi-code>", file=sys.stderr)
             return 2
-        from telos.codex_tracing import main as codex_tracing_main
-        return codex_tracing_main([])
+        return tracing_main([])
     if subcommand == "showcase":
         from telos.scripts.showcase import main as showcase_main
         return showcase_main(rest)
@@ -290,9 +293,13 @@ def _cmd_launch_harness(name: str) -> int:
     base_url = state.base_url() if state else cfg.gateway.base_url()
 
     child_env = os.environ.copy()
-    child_env.update(gateway_env(spec, base_url))
+    injected = gateway_env(spec, base_url)
+    child_env.update(injected)
 
-    print(f"→ entering {spec.display_name} ({spec.env_var}={base_url})")
+    suffix = "" if not injected else " (" + ", ".join(
+        f"{key}={value}" for key, value in injected.items()
+    ) + ")"
+    print(f"→ entering {spec.display_name}{suffix}")
     sys.stdout.flush()
     sys.stderr.flush()
     try:
@@ -748,7 +755,7 @@ def _print_usage() -> None:
         "Without a subcommand: select and enter a harness CLI.\n"
         "\n"
         "subcommands:\n"
-        "  <harness>   directly enter a harness (claude-code / codex / openclaw / hermes)\n"
+        f"  <harness>   directly enter a harness ({' / '.join(HARNESS_NAMES)})\n"
         "  init        auto-detect harnesses, inject config, start the gateway\n"
         "  uninstall   undo the injection from 'init' (all harnesses, or one via --harness; --purge fully removes telos)\n"
         "  ccswitch    coexist with cc-switch: status (is it active, is telos chained) | sync (re-chain after a switch)\n"

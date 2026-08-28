@@ -22,6 +22,7 @@ _HARNESS_DISPLAY_NAMES: dict[str, str] = {
     "hermes":      "Hermes",
     "openclaw":    "OpenClaw",
     "codex":       "Codex",
+    "kimi-code":   "Kimi Code",
     "telos":       "Telos",   # internal — not user-installable
 }
 
@@ -58,6 +59,9 @@ def load_harness(name: str) -> "HarnessPlugin":
     if name == "codex":
         from telos.harness.codex import CodexPlugin
         return CodexPlugin()
+    if name == "kimi-code":
+        from telos.harness.kimi_code import KimiCodePlugin
+        return KimiCodePlugin()
     if name == "telos":
         from telos.harness.telos import TelosPlugin
         return TelosPlugin()

@@ -131,6 +131,7 @@ Install the adapters, then inspect the unified tree locally:
 
 ```bash
 telos init --harness codex
+telos init --harness kimi-code
 telos init --harness deepseek-harness --replace-telemetry-backend
 # http://127.0.0.1:7171/__telos/traces
 ```
@@ -144,6 +145,8 @@ telos init --harness deepseek-harness --replace-telemetry-backend \
 ```
 
 Adapters generate stable IDs and submit idempotent entity snapshots; the Gateway is the only SQLite writer. Codex installation uses its native plugin manager when available and falls back to a non-destructive `hooks.json` merge on older clients.
+
+Kimi Code integration adds fail-open lifecycle hooks without changing managed OAuth providers. API-key providers also route through the Gateway for model spans. Uninstall removes only TELOS hooks and restores any routed provider URL.
 
 ## The self-evolution contract
 

@@ -131,6 +131,7 @@ Project  →  Thread  →  Trace  →  Span
 
 ```bash
 telos init --harness codex
+telos init --harness kimi-code
 telos init --harness deepseek-harness --replace-telemetry-backend
 # http://127.0.0.1:7171/__telos/traces
 ```
@@ -144,6 +145,8 @@ telos init --harness deepseek-harness --replace-telemetry-backend \
 ```
 
 Adapter 生成稳定 ID 并提交幂等实体快照；Gateway 是唯一的 SQLite writer。Codex 安装优先使用原生 plugin manager，旧客户端才回退到不破坏用户配置的 `hooks.json` 合并。
+
+Kimi Code 适配会追加 fail-open 生命周期 hooks，且不修改托管 OAuth provider。API Key provider 还会经 Gateway 记录模型 span。卸载只移除 TELOS hooks，并恢复曾被代理的 provider URL。
 
 ## 自我进化契约
 

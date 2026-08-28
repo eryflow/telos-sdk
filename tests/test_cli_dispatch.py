@@ -91,15 +91,20 @@ def test_evolve_task_round_trip() -> None:
     assert policy["promotion"] == "manual"
 
 
-def test_trace_hook_dispatches_only_codex() -> None:
+def test_trace_hook_dispatches_supported_hooks() -> None:
     with patch("telos.codex_tracing.main", return_value=7) as hook:
         rc, _ = _run(["trace-hook", "codex"])
     assert rc == 7
     hook.assert_called_once_with([])
 
+    with patch("telos.kimi_tracing.main", return_value=8) as hook:
+        rc, _ = _run(["trace-hook", "kimi-code"])
+    assert rc == 8
+    hook.assert_called_once_with([])
+
     rc, out = _run(["trace-hook", "deepseek-harness"])
     assert rc == 2
-    assert "usage: telos trace-hook codex" in out
+    assert "usage: telos trace-hook <codex|kimi-code>" in out
 
 
 def test_dashboard_rejects_bad_verb() -> None:

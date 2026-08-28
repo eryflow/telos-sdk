@@ -40,6 +40,7 @@ def test_harness_display_name() -> None:
     assert harness_display_name("hermes") == "Hermes"
     assert harness_display_name("openclaw") == "OpenClaw"
     assert harness_display_name("codex") == "Codex"
+    assert harness_display_name("kimi-code") == "Kimi Code"
     # Unknown / sentinel names pass through unchanged so the dashboard can
     # surface anonymous or untagged traffic without a lookup miss.
     assert harness_display_name("passthrough") == "passthrough"

@@ -13,6 +13,8 @@ One installer per harness:
 - ``codex``: patches ``~/.codex/config.toml`` with a TELOS custom provider.
 - ``deepseek-harness``: mounts the TELOS native session-telemetry backend in a
   named DSH profile patch layer.
+- ``kimi-code``: installs lifecycle hooks and routes API-key providers through
+  the gateway.
 - ``generic``: prints a set of shell ``export`` commands the user can add
   to their rc file.
 """
@@ -27,6 +29,7 @@ from telos.init.codex import CodexInstaller
 from telos.init.deepseek_harness import DeepSeekHarnessInstaller
 from telos.init.generic import GenericInstaller
 from telos.init.hermes import HermesInstaller
+from telos.init.kimi_code import KimiCodeInstaller
 from telos.init.openclaw import OpenClawInstaller
 
 # name → factory; the factory signature is uniformly ``(*, proxy_url=...) -> AgentInstaller``.
@@ -36,6 +39,7 @@ INSTALLERS: dict[str, InstallerFactory] = {
     "claude-code": ClaudeCodeInstaller,
     "codex": CodexInstaller,
     "deepseek-harness": DeepSeekHarnessInstaller,
+    "kimi-code": KimiCodeInstaller,
     "openclaw": OpenClawInstaller,
     "hermes": HermesInstaller,
     "generic": GenericInstaller,

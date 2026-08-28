@@ -282,7 +282,7 @@ async def _test_openai_tag_attributes_each_harness(tmp_log: Path) -> None:
                                             extra_slugs=extra)
     try:
         async with aiohttp.ClientSession() as client:
-            for harness in ("hermes", "openclaw", "codex"):
+            for harness in ("hermes", "openclaw", "codex", "kimi-code"):
                 mock.last_body = None
                 async with client.post(
                     f"{px_url}/_h/{harness}/upstreams/deepseek/v1/chat/completions",
@@ -731,6 +731,68 @@ async def _test_passthrough_html_error_becomes_json() -> None:
         await up_runner.cleanup()
 
 
+async def _test_kimi_openai_slug_accepts_messages_and_forwards_identity_headers() -> None:
+    seen: dict[str, str] = {}
+
+    async def messages(request: web.Request) -> web.Response:
+        seen.update({key.lower(): value for key, value in request.headers.items()})
+        return web.json_response({
+            "id": "msg_kimi",
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "text", "text": "ok"}],
+            "model": "k3",
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 3, "output_tokens": 1},
+        })
+
+    up_app = web.Application()
+    up_app.router.add_post("/v1/messages", messages)
+    up_runner = web.AppRunner(up_app)
+    await up_runner.setup()
+    up_site = web.TCPSite(up_runner, "127.0.0.1", 0)
+    await up_site.start()
+    up_port = up_site._server.sockets[0].getsockname()[1]
+    upstream = f"http://127.0.0.1:{up_port}"
+
+    app = make_app(upstream="http://unused", upstreams={
+        "kimi-code-upstream": UpstreamConfig(
+            url=upstream,
+            engine="openai",
+            protocol="openai-chat",
+            via="kimi-code",
+        ),
+    })
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    port = site._server.sockets[0].getsockname()[1]
+    try:
+        async with aiohttp.ClientSession() as client:
+            async with client.post(
+                f"http://127.0.0.1:{port}/_h/kimi-code/upstreams/kimi-code-upstream/v1/messages",
+                json={
+                    "model": "k3",
+                    "max_tokens": 16,
+                    "messages": [{"role": "user", "content": "hello"}],
+                },
+                headers={
+                    "authorization": "Bearer test",
+                    "anthropic-version": "2023-06-01",
+                    "x-msh-platform": "kimi_code_cli",
+                    "x-msh-device-id": "device-1",
+                },
+            ) as response:
+                assert response.status == 200, await response.text()
+        assert seen["authorization"] == "Bearer test"
+        assert seen["x-msh-platform"] == "kimi_code_cli"
+        assert seen["x-msh-device-id"] == "device-1"
+    finally:
+        await runner.cleanup()
+        await up_runner.cleanup()
+
+
 def test_openai_route_non_streaming() -> None:
     asyncio.run(_test_openai_route_non_streaming())
 
@@ -777,3 +839,7 @@ def test_passthrough_html_error_becomes_json() -> None:
 
 def test_anthropic_route_still_works() -> None:
     asyncio.run(_test_anthropic_route_still_works())
+
+
+def test_kimi_openai_slug_accepts_messages_and_forwards_identity_headers() -> None:
+    asyncio.run(_test_kimi_openai_slug_accepts_messages_and_forwards_identity_headers())

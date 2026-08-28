@@ -15,6 +15,7 @@ from telos.init import INSTALLERS
 from telos.init.claude_code import ClaudeCodeInstaller
 from telos.init.codex import CodexInstaller
 from telos.init.hermes import HermesInstaller
+from telos.init.kimi_code import KimiCodeInstaller
 from telos.init.openclaw import OpenClawInstaller
 
 
@@ -23,3 +24,4 @@ def test_registry_maps_names_to_installer_classes() -> None:
     assert INSTALLERS["openclaw"] is OpenClawInstaller
     assert INSTALLERS["hermes"] is HermesInstaller
     assert INSTALLERS["codex"] is CodexInstaller
+    assert INSTALLERS["kimi-code"] is KimiCodeInstaller

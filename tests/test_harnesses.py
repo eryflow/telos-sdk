@@ -8,10 +8,12 @@ import telos.harnesses as h
 
 
 def test_specs_present() -> None:
-    for name in ("claude-code", "codex", "openclaw", "hermes"):
+    for name in ("claude-code", "codex", "openclaw", "hermes", "kimi-code"):
         spec = h.get_spec(name)
         assert spec.name == name
-        assert spec.env_var in ("ANTHROPIC_BASE_URL", "OPENAI_BASE_URL")
+        assert spec.env_var in (
+            "ANTHROPIC_BASE_URL", "OPENAI_BASE_URL", "KIMI_CODE_BASE_URL",
+        )
     print("✓ test_specs_present")
 
 
@@ -36,6 +38,7 @@ def test_gateway_env() -> None:
         "OPENAI_BASE_URL": "http://x"}
     assert h.gateway_env(h.get_spec("hermes"), "http://x") == {
         "ANTHROPIC_BASE_URL": "http://x"}
+    assert h.gateway_env(h.get_spec("kimi-code"), "http://x/") == {}
     print("✓ test_gateway_env")
 
 

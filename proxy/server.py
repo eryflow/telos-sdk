@@ -72,6 +72,7 @@ _DEFAULT_UPSTREAM = "https://api.anthropic.com"
 # attribution is fixed at the source, no detection guess-work involved.
 _VALID_HARNESS_TAGS = frozenset({
     "claude-code", "hermes", "openclaw", "codex", "deepseek-harness",
+    "kimi-code",
 })
 
 # Headers preserved when forwarding to upstream (auth / protocol version / Anthropic private beta).
@@ -95,6 +96,12 @@ _FORWARD_HEADER_WHITELIST = (
     "chatgpt-account-id",
     "session_id",
     "originator",
+    "x-msh-platform",
+    "x-msh-version",
+    "x-msh-device-name",
+    "x-msh-device-model",
+    "x-msh-os-version",
+    "x-msh-device-id",
 )
 
 _log = logging.getLogger("telos.proxy")
@@ -280,6 +287,16 @@ def _normalize_responses_usage(u: Mapping[str, Any]) -> dict[str, int]:
         "cache_write": 0,
         "output": int(u.get("output_tokens") or 0),
     }
+
+
+def _normalize_trace_usage(
+    protocol: str, usage: Mapping[str, Any],
+) -> dict[str, int]:
+    if protocol == "anthropic-messages":
+        return _normalize_usage(dict(usage))
+    if protocol == "openai-chat":
+        return _normalize_openai_usage(usage)
+    return _normalize_responses_usage(usage)
 
 
 def _anthropic_error(status: int, err_type: str, message: str) -> web.Response:
@@ -640,6 +657,7 @@ class ProxyApp:
         model: str,
         provider: str,
         route: str,
+        protocol: str = "openai-responses",
         streaming: bool,
     ) -> dict[str, Any] | None:
         store = self._tracing_store
@@ -673,7 +691,7 @@ class ProxyApp:
                 "start_time_us": started,
                 "input": dict(raw),
                 "metadata": {
-                    "protocol": "openai-responses",
+                    "protocol": protocol,
                     "route": route,
                     "streaming": streaming,
                 },
@@ -695,6 +713,7 @@ class ProxyApp:
         *,
         status: str,
         usage: Mapping[str, Any],
+        protocol: str = "openai-responses",
         http_status: int,
         output: Any = None,
         error: Any = None,
@@ -703,7 +722,7 @@ class ProxyApp:
         if handle is None or self._tracing_store is None:
             return
         finished = time.time_ns() // 1_000
-        normalized = _normalize_responses_usage(usage)
+        normalized = _normalize_trace_usage(protocol, usage)
         reasoning = int(
             (usage.get("output_tokens_details") or {}).get("reasoning_tokens", 0)
             or 0
@@ -938,6 +957,16 @@ class ProxyApp:
             result.harness = self._resolve_harness(request, raw)
 
         is_streaming = bool(raw.get("stream", False))
+        trace_span = self._start_gateway_model_span(
+            harness=result.harness,
+            session_id=session_id,
+            raw=raw,
+            model=result.model,
+            provider=str(request.get("_telos_upstream_slug") or "anthropic"),
+            route=str(request.get("_telos_route_tail") or "v1/messages"),
+            protocol="anthropic-messages",
+            streaming=is_streaming,
+        )
         url = f"{self.upstream}/v1/messages"
         headers = self._forward_headers(request)
         body_bytes = json.dumps(result.wire).encode("utf-8")
@@ -951,15 +980,24 @@ class ProxyApp:
         except aiohttp.ClientError as e:
             _log.error("Upstream connection failed after retries (call=%d): %s",
                        call_index, e)
+            self._finish_gateway_model_span(
+                trace_span,
+                status="error",
+                usage={},
+                protocol="anthropic-messages",
+                http_status=502,
+                error={"type": type(e).__name__, "message": str(e)},
+            )
             return _anthropic_error(502, "api_error", f"Upstream error: {e}")
 
         if is_streaming:
             return await self._stream_response(
                 request, upstream, session_id, result, session_state,
-                call_index, t0,
+                call_index, t0, trace_span,
             )
         return await self._buffered_response(
             upstream, session_id, result, session_state, call_index, t0,
+            trace_span,
         )
 
     # ------------------------------------------------------------------
@@ -974,6 +1012,7 @@ class ProxyApp:
         session_state: BridgeSessionState,
         call_index: int,
         t0: float,
+        trace_span: dict[str, Any] | None,
     ) -> web.Response:
         try:
             body = await upstream.read()
@@ -983,6 +1022,7 @@ class ProxyApp:
             upstream.release()
 
         usage: dict[str, Any] = {}
+        parsed: Any = None
         if status == 200:
             try:
                 parsed = json.loads(body.decode("utf-8"))
@@ -1006,6 +1046,16 @@ class ProxyApp:
             call_index=call_index,
         )
         self._update_inspector(session_id, result, usage, call_index, latency_s)
+        self._finish_gateway_model_span(
+            trace_span,
+            status="ok" if status < 400 else "error",
+            usage=usage,
+            protocol="anthropic-messages",
+            http_status=status,
+            output=parsed if status < 400 else None,
+            error=(parsed if parsed is not None else body[:2000].decode("utf-8", "replace"))
+            if status >= 400 else None,
+        )
         return web.Response(body=body, status=status, headers={"Content-Type": ct})
 
     # ------------------------------------------------------------------
@@ -1021,6 +1071,7 @@ class ProxyApp:
         session_state: BridgeSessionState,
         call_index: int,
         t0: float,
+        trace_span: dict[str, Any] | None,
     ) -> web.StreamResponse:
         status = upstream.status
 
@@ -1040,6 +1091,14 @@ class ProxyApp:
                 streaming=True,
                 status=status,
                 call_index=call_index,
+            )
+            self._finish_gateway_model_span(
+                trace_span,
+                status="error",
+                usage={},
+                protocol="anthropic-messages",
+                http_status=status,
+                error=body[:2000].decode("utf-8", "replace"),
             )
             return web.Response(body=body, status=status, headers={"Content-Type": ct})
 
@@ -1064,11 +1123,21 @@ class ProxyApp:
             _log.info("downstream disconnected before stream start (call=%d): %s",
                       call_index, e)
             upstream.release()
+            self._finish_gateway_model_span(
+                trace_span,
+                status="cancelled",
+                usage={},
+                protocol="anthropic-messages",
+                http_status=200,
+                error={"type": type(e).__name__, "message": str(e)},
+            )
             return downstream
 
         usage_aggregate: dict[str, Any] = {}
         sse_buf = b""
 
+        disconnected = False
+        stream_error: Any = None
         try:
             async for chunk in upstream.content.iter_any():
                 # Forward immediately, without waiting for a complete SSE event
@@ -1076,6 +1145,7 @@ class ProxyApp:
                     await downstream.write(chunk)
                 except (ConnectionResetError, asyncio.CancelledError):
                     _log.info("downstream disconnected mid-stream (call=%d)", call_index)
+                    disconnected = True
                     break
 
                 # Side channel: accumulate and parse complete SSE blocks to extract usage
@@ -1083,8 +1153,9 @@ class ProxyApp:
                 while b"\n\n" in sse_buf:
                     block, sse_buf = sse_buf.split(b"\n\n", 1)
                     self._peek_sse_block(block, usage_aggregate)
-        except aiohttp.ClientPayloadError:
+        except aiohttp.ClientPayloadError as exc:
             _log.warning("upstream closed connection mid-stream (call=%d)", call_index)
+            stream_error = {"type": type(exc).__name__, "message": str(exc)}
 
         try:
             await downstream.write_eof()
@@ -1103,6 +1174,14 @@ class ProxyApp:
             call_index=call_index,
         )
         self._update_inspector(session_id, result, usage_aggregate, call_index, latency_s)
+        self._finish_gateway_model_span(
+            trace_span,
+            status="error" if stream_error else ("cancelled" if disconnected else "ok"),
+            usage=usage_aggregate,
+            protocol="anthropic-messages",
+            http_status=200,
+            error=stream_error,
+        )
         return downstream
 
     # ------------------------------------------------------------------
@@ -1463,9 +1542,9 @@ class ProxyApp:
         - ``<slug>`` must be registered in ``self.upstreams``; otherwise 404.
         - If the upstream is an ``openai-chat`` protocol and the tail is
           ``v1/chat/completions``, run the TELOS OpenAI pipeline and forward.
-        - If the upstream is an ``anthropic-messages`` protocol and the tail
-          is ``v1/messages``, run the existing anthropic pipeline (via the
-          slug's upstream rather than ``self.upstream``).
+        - If the tail is ``v1/messages``, run the existing anthropic pipeline
+          regardless of the slug's default protocol. Kimi Code can select
+          Chat Completions or Messages at runtime for the same provider.
         - Anything else under the same slug is passthrough to ``<url>/<tail>``
           (so users can hit ``/v1/models``, ``/v1/embeddings``, etc.).
 
@@ -1506,8 +1585,7 @@ class ProxyApp:
             return await self._handle_openai_responses(
                 request, slug, upstream_cfg, tail,
             )
-        if (upstream_cfg.protocol == "anthropic-messages"
-                and tail.endswith("v1/messages")
+        if (tail.endswith("v1/messages")
                 and request.method == "POST"):
             # The anthropic pipeline already runs through handle_messages;
             # temporarily swap self.upstream so the forward target is this
@@ -1519,6 +1597,8 @@ class ProxyApp:
             saved_upstream = self.upstream
             saved_harness = self.harness_override
             self.upstream = upstream_cfg.url.rstrip("/")
+            request["_telos_upstream_slug"] = slug
+            request["_telos_route_tail"] = tail
             if upstream_cfg.via:
                 self.harness_override = upstream_cfg.via
             try:
@@ -1748,6 +1828,16 @@ class ProxyApp:
         result.raw_messages = _summarize_openai_messages(raw)
 
         is_streaming = bool(raw.get("stream", False))
+        trace_span = self._start_gateway_model_span(
+            harness=result.harness,
+            session_id=session_id,
+            raw=raw,
+            model=result.model,
+            provider=slug,
+            route=tail,
+            protocol="openai-chat",
+            streaming=is_streaming,
+        )
         url = f"{upstream_cfg.url.rstrip('/')}/{tail}"
         if request.query_string:
             url = f"{url}?{request.query_string}"
@@ -1764,15 +1854,24 @@ class ProxyApp:
         except aiohttp.ClientError as e:
             _log.error("Upstream connection failed (call=%d): %s",
                        call_index, e)
+            self._finish_gateway_model_span(
+                trace_span,
+                status="error",
+                usage={},
+                protocol="openai-chat",
+                http_status=502,
+                error={"type": type(e).__name__, "message": str(e)},
+            )
             return _anthropic_error(502, "api_error", f"Upstream error: {e}")
 
         if is_streaming:
             return await self._stream_openai_response(
                 request, upstream, session_id, result, session_state,
-                call_index, t0,
+                call_index, t0, trace_span,
             )
         return await self._buffered_openai_response(
             upstream, session_id, result, session_state, call_index, t0,
+            trace_span,
         )
 
     async def _buffered_openai_response(
@@ -1783,6 +1882,7 @@ class ProxyApp:
         session_state: BridgeSessionState,
         call_index: int,
         t0: float,
+        trace_span: dict[str, Any] | None,
     ) -> web.Response:
         """Non-streaming chat completions response: read body, extract usage, log."""
         try:
@@ -1793,6 +1893,7 @@ class ProxyApp:
             upstream.release()
 
         usage: dict[str, Any] = {}
+        parsed: Any = None
         if status == 200:
             try:
                 parsed = json.loads(body.decode("utf-8"))
@@ -1811,6 +1912,16 @@ class ProxyApp:
             status=status,
             call_index=call_index,
         )
+        self._finish_gateway_model_span(
+            trace_span,
+            status="ok" if status < 400 else "error",
+            usage=usage,
+            protocol="openai-chat",
+            http_status=status,
+            output=parsed if status < 400 else None,
+            error=(parsed if parsed is not None else body[:2000].decode("utf-8", "replace"))
+            if status >= 400 else None,
+        )
         # ``_update_inspector`` reads usage via the anthropic normalizer; for
         # OpenAI traffic the dashboard's openai-side metrics are owned by
         # ``_log_openai_usage``, so we skip inspector here in Phase 1.
@@ -1826,6 +1937,7 @@ class ProxyApp:
         session_state: BridgeSessionState,
         call_index: int,
         t0: float,
+        trace_span: dict[str, Any] | None,
     ) -> web.StreamResponse:
         """OpenAI ChatCompletions SSE: byte-forward chunks; extract usage from
         the trailing chunk if ``stream_options.include_usage`` was set.
@@ -1847,6 +1959,14 @@ class ProxyApp:
                 status=status,
                 call_index=call_index,
             )
+            self._finish_gateway_model_span(
+                trace_span,
+                status="error",
+                usage={},
+                protocol="openai-chat",
+                http_status=status,
+                error=body[:2000].decode("utf-8", "replace"),
+            )
             return web.Response(body=body, status=status,
                                 headers={"Content-Type": ct})
 
@@ -1865,10 +1985,20 @@ class ProxyApp:
             _log.info("downstream disconnected before stream start (call=%d): %s",
                       call_index, e)
             upstream.release()
+            self._finish_gateway_model_span(
+                trace_span,
+                status="cancelled",
+                usage={},
+                protocol="openai-chat",
+                http_status=200,
+                error={"type": type(e).__name__, "message": str(e)},
+            )
             return downstream
 
         usage_aggregate: dict[str, Any] = {}
         sse_buf = b""
+        disconnected = False
+        stream_error: Any = None
         try:
             async for chunk in upstream.content.iter_any():
                 try:
@@ -1876,14 +2006,16 @@ class ProxyApp:
                 except (ConnectionResetError, asyncio.CancelledError):
                     _log.info("downstream disconnected mid-stream (call=%d)",
                               call_index)
+                    disconnected = True
                     break
                 sse_buf += chunk
                 while b"\n\n" in sse_buf:
                     block, sse_buf = sse_buf.split(b"\n\n", 1)
                     self._peek_openai_sse_block(block, usage_aggregate)
-        except aiohttp.ClientPayloadError:
+        except aiohttp.ClientPayloadError as exc:
             _log.warning("upstream closed connection mid-stream (call=%d)",
                          call_index)
+            stream_error = {"type": type(exc).__name__, "message": str(exc)}
 
         try:
             await downstream.write_eof()
@@ -1899,6 +2031,14 @@ class ProxyApp:
             streaming=True,
             status=200,
             call_index=call_index,
+        )
+        self._finish_gateway_model_span(
+            trace_span,
+            status="error" if stream_error else ("cancelled" if disconnected else "ok"),
+            usage=usage_aggregate,
+            protocol="openai-chat",
+            http_status=200,
+            error=stream_error,
         )
         return downstream
 
@@ -2049,6 +2189,7 @@ class ProxyApp:
             model=result.model,
             provider=slug,
             route=tail,
+            protocol="openai-responses",
             streaming=is_streaming,
         )
         url = f"{upstream_cfg.url.rstrip('/')}/{tail}"
@@ -2070,6 +2211,7 @@ class ProxyApp:
                 trace_span,
                 status="error",
                 usage={},
+                protocol="openai-responses",
                 http_status=502,
                 error={"type": type(e).__name__, "message": str(e)},
             )
@@ -2133,6 +2275,7 @@ class ProxyApp:
             trace_span,
             status="ok" if status < 400 else "error",
             usage=usage,
+            protocol="openai-responses",
             http_status=status,
             output=parsed if status < 400 else None,
             error=(parsed if parsed is not None else body[:2000].decode("utf-8", "replace"))
@@ -2176,6 +2319,7 @@ class ProxyApp:
                 trace_span,
                 status="error",
                 usage={},
+                protocol="openai-responses",
                 http_status=status,
                 error=error_body,
             )
@@ -2201,6 +2345,7 @@ class ProxyApp:
                 trace_span,
                 status="cancelled",
                 usage={},
+                protocol="openai-responses",
                 http_status=200,
                 error={"type": type(e).__name__, "message": str(e)},
             )
@@ -2256,6 +2401,7 @@ class ProxyApp:
             trace_span,
             status=trace_status,
             usage=usage_aggregate,
+            protocol="openai-responses",
             http_status=200,
             output=completed_response or None,
             error=stream_error,
