@@ -5,6 +5,8 @@ from __future__ import annotations
 import io
 import json
 
+import pytest
+
 from telos.kimi_tracing import map_kimi_hook, run_kimi_hook, stable_id
 
 
@@ -39,6 +41,13 @@ def test_maps_turn_tool_failure_and_interrupt() -> None:
     ended = map_kimi_hook(_payload("Interrupt", reason="user"), 300)[1]["body"]
     assert ended["status"] == "cancelled"
     assert ended["end_time_us"] == 300
+
+
+def test_mapping_inherits_explicit_attempt_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TELOS_ATTEMPT_ID", "attempt-8")
+    operations = map_kimi_hook(_payload("UserPromptSubmit", prompt="continue"), 100)
+    assert operations[0]["body"]["attempt_id"] == "attempt-8"
+    assert operations[1]["body"]["attempt_id"] == "attempt-8"
 
 
 def test_runner_correlates_events_and_is_fail_open(tmp_path) -> None:

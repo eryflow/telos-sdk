@@ -68,6 +68,8 @@ def _thread(payload: dict[str, Any], now_us: int, *, finished: bool = False) -> 
         "start_time_us": now_us,
         "metadata": _metadata(payload, "cwd", "client_type", "model", "profile", "source", "reason"),
     }
+    if os.environ.get("TELOS_ATTEMPT_ID"):
+        body["attempt_id"] = os.environ["TELOS_ATTEMPT_ID"]
     if finished:
         body["end_time_us"] = now_us
     return body
@@ -97,6 +99,8 @@ def _trace(
         "source_updated_at_us": now_us,
         "metadata": _metadata(payload, "cwd", "client_type", "origin_kind", "origin_name", "model"),
     }
+    if os.environ.get("TELOS_ATTEMPT_ID"):
+        body["attempt_id"] = os.environ["TELOS_ATTEMPT_ID"]
     if input_value is not None:
         body["input"] = input_value
     if output_value is not None:

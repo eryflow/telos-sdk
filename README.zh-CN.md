@@ -15,7 +15,7 @@
 [![Status](https://img.shields.io/badge/status-Beta-d8851f?style=flat-square)](CHANGELOG.md)
 [![Version](https://img.shields.io/badge/version-0.1.8-4FB3BF?style=flat-square)](CHANGELOG.md)
 
-[**快速开始**](#quickstart) &nbsp;·&nbsp; [**工作原理**](#how-it-works) &nbsp;·&nbsp; [**节省效果**](#cost-optimization) &nbsp;·&nbsp; [**当前能力**](#what-ships-today) &nbsp;·&nbsp; [**设计决策**](docs/adr/0002-opik-style-agent-tracing-platform.md)
+[**快速开始**](#quickstart) &nbsp;·&nbsp; [**工作原理**](#how-it-works) &nbsp;·&nbsp; [**节省效果**](#cost-optimization) &nbsp;·&nbsp; [**当前能力**](#what-ships-today) &nbsp;·&nbsp; [**上下文设计**](docs/adr/0003-portable-context-pack-and-self-evolution.md)
 
 [📖 English](README.md) &nbsp;|&nbsp; **🇨🇳 简体中文**
 
@@ -42,18 +42,20 @@ Prompt Cache 优化仍然是 TELOS 的底层能力，但它现在服务于更完
 
 ```mermaid
 flowchart LR
-    H["Agent Harness<br/>Codex · DeepSeek Harness · 其他"] --> G["本地 TELOS Gateway"]
+    C["不可变 Context Pack"] --> H["Attempt<br/>Codex · Kimi Code · DeepSeek Harness"]
+    H -->|"handoff"| C
+    H --> G["本地 TELOS Gateway"]
     G --> M["你的模型供应商"]
     H -->|"原生 Hook / Telemetry"| T["Thread → Trace → Span"]
     G -->|"模型 Span"| T
     T --> D[("本地 SQLite")]
-    T --> R["回放与回归样本"]
+    T --> R["冻结的回归样本"]
     R --> E["自动离线评测"]
-    E --> O["Prompt · Tool · Workflow · 模型路由候选"]
-    O -. "人工发布" .-> H
+    E --> O["Agent Profile Candidate"]
+    O -. "人工发布 / 回滚" .-> H
 ```
 
-**Tracing 数据库**是默认的唯一记录：它把 Harness 与模型生命周期保存为可查询的 `Thread → Trace → Span` 树，其中包含可回放的原始 LLM 请求、工具、子 Agent、审批、usage、TTFT 与错误。旧 JSONL corpus 仅作为显式 `--record-corpus` 兼容选项保留。
+`TaskType → TaskRun → Attempt` 在 Harness Session 之上持有任务身份。不可变 Context Pack 保存目标、策略、进度、记忆、规范化对话、工作区和来源；Trace 树只作为证据层。Context Control Plane 位于 `http://127.0.0.1:7171/__telos/`，原始证据位于 `.../__telos/traces`。
 
 <a id="what-ships-today"></a>
 
@@ -64,13 +66,14 @@ flowchart LR
 | 为 Codex、Claude Code、OpenClaw 和 Hermes 注入本地 Gateway | **已可用** |
 | 从 SQLite LLM Span 跨模式回放；兼容可选旧 corpus | **已可用** |
 | SQLite Trace/Span 存储、带鉴权的 batch ingest 与本地 Trace Explorer | **已可用** |
-| Codex 原生 Hook 与 DeepSeek Harness telemetry adapter | **已可用** |
-| `telos evolve --task` 任务类型策略，默认离线评测、人工发布 | **已可用** |
-| 更多 Harness 的原生 tracing adapter | **下一阶段** |
-| 自动结果标注、失败归因、回归集生成和候选方案评测 | **下一阶段** |
-| SFT/RL 数据集导出 | **规划中** |
+| Codex、Kimi Code 与 DeepSeek Harness 原生 tracing adapter | **已可用** |
+| 确定性 Context Pack、`.telosbundle`、secret/path/checksum 校验 | **已可用** |
+| Codex ↔ Kimi handoff、显式能力降级与 Attempt 谱系 | **已可用** |
+| Context/Runs/Evolution/Evidence 本地控制面 | **已可用** |
+| 冻结结果、单维 Candidate、跨 Harness 质量门、发布与回滚 | **已可用** |
+| SFT、Preference 与 RL JSONL 导出 | **已可用** |
 
-当前 `evolve` 命令只负责配置进化策略，尚不会启动评测 Worker，也不会自动修改生产 Agent 行为。
+评测只在用户显式触发时离线执行；TELOS 永不自动发布 Candidate。`telos evolve run` 执行冻结矩阵，`promote` 与 `rollback` 只移动有审计记录的 production pointer。
 
 <a id="quickstart"></a>
 
@@ -81,11 +84,16 @@ flowchart LR
 curl -fsSL https://raw.githubusercontent.com/learningCatHD/telos-sdk/main/scripts/install.sh | bash
 # 或：uv pip install -U telos-sdk
 
-# 接管一个 Harness。之后新启动的 Codex 进程会经过本地 Gateway。
+# 接入 Harness adapter 并启动本地 Gateway。
 telos init --harness codex
+telos init --harness kimi-code
 
-# 为某类任务开启离线进化策略。
-telos evolve --task "代码缺陷修复"
+# 创建 TaskRun，并带明确 Attempt 身份进入 Codex。
+telos run start --task code-defect-repair --goal "修复 tab 状态" --harness codex
+
+# 在该 Session 中打包，再切到 Kimi Code。
+telos pack --done "已复现" --next "修复轮询刷新" --decision "选择态属于 UI"
+telos handoff kimi-code --pack <pack-id>
 
 # 查看 Harness 注入、Gateway 和流量转发状态。
 telos status
@@ -106,8 +114,12 @@ TELOS 将状态持久化到 `~/.telos/`：
 | 路径 | 内容 |
 |---|---|
 | `config.json` | Gateway、Harness Trace 和进化策略；包含各 Harness 的 tracing token |
+| `control.token` | 权限为 `0600` 的本地控制面写入 token |
+| `packs/` | 不可变 Context Pack 目录 |
+| `profiles/` | 不可变 Agent Profile Revision 目录 |
+| `runs/` | TELOS 自有的临时 handoff Launch Plan |
 | `corpus/` | 可选旧版原始请求 corpus（仅 `--record-corpus`） |
-| `telos.db` | SQLite projects、threads、traces、spans 与 feedback |
+| `telos.db` | SQLite TaskRun、Attempt、Pack、Profile、Evaluation、Trace、Span 与 feedback |
 | `usage.jsonl` | Token 用量与成本指标 |
 
 这些文件可能包含 Prompt、源代码、工具结果，以及模型请求中出现的凭据，应按敏感数据保护。TELOS 不会把它们上传到 TELOS 服务，但你配置的模型供应商仍会收到完成推理所需的请求。

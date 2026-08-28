@@ -88,13 +88,14 @@ function threadBody(sessionId, state, timeUs, status = 'running') {
       seed_length: state.attributes['session.seed_length'],
     },
   }
+  if (process.env.TELOS_ATTEMPT_ID) body.attempt_id = process.env.TELOS_ATTEMPT_ID
   if (status !== 'running') body.end_time_us = timeUs
   return body
 }
 
 function traceBody(sessionId, state, timeUs, fields = {}) {
   const externalId = `${sessionId}:${state.turn}`
-  return {
+  const body = {
     id: entityId('trace', externalId),
     project_name: 'default',
     thread_id: entityId('thread', sessionId),
@@ -110,6 +111,8 @@ function traceBody(sessionId, state, timeUs, fields = {}) {
     source_updated_at_us: timeUs,
     ...fields,
   }
+  if (process.env.TELOS_ATTEMPT_ID) body.attempt_id = process.env.TELOS_ATTEMPT_ID
+  return body
 }
 
 function stepBody(sessionId, state, timeUs, fields = {}) {

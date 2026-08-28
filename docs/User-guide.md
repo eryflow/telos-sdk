@@ -39,7 +39,7 @@ telos init
 ```
 
 `telos init` with no arguments will: auto-detect which harness CLIs are installed locally
-(claude-code / codex / openclaw / hermes) → inject config pointing at the local gateway into each
+(claude-code / codex / kimi-code / deepseek-harness / openclaw / hermes) → inject config pointing at the local gateway into each
 → start the gateway in the background → print the gateway and dashboard addresses.
 
 Afterward:
@@ -219,7 +219,7 @@ openclaw / hermes patch their own provider configs. Any client that respects
 
 ```
 telos                        bare command: pick a harness and enter its CLI
-telos <harness>              enter a harness directly (claude-code / codex / openclaw / hermes)
+telos <harness>              enter a harness directly (claude-code / codex / kimi-code / deepseek-harness / openclaw / hermes)
 telos alias <harness>        set the harness that bare telos enters by default
 
 telos init [options]
@@ -252,11 +252,105 @@ telos gateway [start|stop|status|restart] [options]
 telos mode [none|telos|rtk|both]   switch the optimization gear; hot-reloads the running gateway and persists it
 telos dashboard [--static] [--no-open]   open the dashboard in the browser
 
+telos run start --task TYPE --goal GOAL --harness HARNESS
+telos run list|show|finish   own one TaskRun across Harness Attempts
+telos pack [--attempt ID]   create a semantic checkpoint (uses TELOS_ATTEMPT_ID by default)
+telos pack inspect ID
+telos pack export ID -o task.telosbundle
+telos pack import task.telosbundle
+telos handoff HARNESS [--pack ID|--attempt ID] [--plan|--no-exec]
+
+telos evolve --task TYPE    enable the offline/manual evolution policy
+telos evolve bootstrap --task TYPE --instructions TEXT
+telos evolve outcome --run ID --outcome pass|fail|unknown [--classification NAME]
+telos evolve freeze --task TYPE --pack ID --outcome-id ID --protected \
+  --harness codex --harness kimi-code --command ./evaluate-case
+telos evolve run --task TYPE
+telos evolve status --task TYPE
+telos evolve promote REVISION_ID
+telos evolve rollback --task TYPE
+telos evolve export --task TYPE --output ./training-data
+
 telos proxy [options]        hidden alias: runs the gateway in the foreground, blocking; fully compatible with the old flags
 ```
 
 For `telos gateway` / `telos init`, any host/port/mode not passed defaults to `~/.telos/config.json`;
 explicitly passed values are written back as the new default.
+
+---
+
+## Context Packs and cross-Harness handoff
+
+TELOS separates three facts that must not be mixed:
+
+- a **Context Pack** is an immutable snapshot of one task's resumable semantic state;
+- an **Agent Profile Revision** is immutable long-term behavior for a TaskType;
+- a **Trace** is evidence of what one Attempt actually did.
+
+Start a task through TELOS so Harness hooks inherit an explicit Attempt identity:
+
+```bash
+telos run start \
+  --task code-defect-repair \
+  --goal "make trace tab selection persist" \
+  --harness codex
+```
+
+At a turn boundary, capture the facts another Harness needs to continue:
+
+```bash
+telos pack \
+  --done "reproduced the polling reset" \
+  --next "separate selected tab from refreshed detail" \
+  --decision "polling may replace payload, never UI selection"
+```
+
+If progress and decisions are not supplied, TELOS reconstructs bounded conversation and workspace evidence from linked Traces and marks the Pack `partial`; it never pretends inferred state is complete. Workspace patches include tracked changes, while untracked files remain listed and make the Pack `dirty`.
+
+If a known fixture or generated file intentionally contains secret-like text, exclude that exact relative path instead of disabling scanning globally:
+
+```bash
+telos pack --exclude-workspace-path tests/fixtures/fake_secret.txt \
+  --done "checkpoint captured" --next "continue verification" \
+  --decision "fixture is intentionally excluded from the portable patch"
+```
+
+Inspect compatibility before switching, then launch the destination Attempt:
+
+```bash
+telos handoff kimi-code --pack <pack-id> --plan
+telos handoff kimi-code --pack <pack-id>
+
+# reverse handoff keeps the same TaskRun and creates another Attempt
+telos handoff codex --pack <new-pack-id>
+```
+
+Codex receives a bounded startup prompt pointing to a TELOS-owned `HANDOFF.md`. Kimi Code receives a temporary `--agent-file`. Neither path overwrites global Harness instructions. Every launched process inherits `TELOS_ATTEMPT_ID`, so its Thread and Trace records link without time-based guessing.
+
+Bundle operations are deterministic and fail closed on path traversal, checksum mismatch, size/compression limits, credential filenames, and high-confidence secrets:
+
+```bash
+telos pack export <pack-id> -o task.telosbundle
+telos pack import task.telosbundle
+```
+
+The Context Control Plane is served at `http://127.0.0.1:7171/__telos/`. It answers which task is current, whether the Pack is complete, what each destination loses, which Attempt is running, and which Profile gates are challenged. The Evidence page remains at `/__telos/traces`.
+
+## Offline self-evolution
+
+An Outcome Resolution must be explicit; a Harness exiting normally is not treated as success. Freeze representative Pack/outcome pairs as RegressionCases, then evaluate one `change_dimension` Candidate against production over `case × {reference,candidate} × required Harness`.
+
+The built-in gates cover matrix validity, protected regressions, score improvement, portability, cost, p95 latency, and independently verified Trace/Attempt/Pack/Profile linkage. Candidate generation only reads public classifications and redacted evidence; evaluator commands receive private scoring policy separately. Passing only marks a Candidate `recommended`—promotion is always manual.
+
+```bash
+telos evolve run --task code-defect-repair
+telos evolve status --task code-defect-repair
+telos evolve promote <recommended-revision-id>
+telos evolve rollback --task code-defect-repair
+telos evolve export --task code-defect-repair --output ./training-data
+```
+
+The export command writes `sft.jsonl`, `preference.jsonl`, and `rl.jsonl`, each retaining immutable evidence identifiers.
 
 ---
 

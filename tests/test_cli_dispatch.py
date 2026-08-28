@@ -81,7 +81,7 @@ def test_evolve_task_round_trip() -> None:
     rc, out = _run(["evolve", "--task", "代码缺陷修复"])
     assert rc == 0
     assert "evaluation policy: offline" in out
-    assert "evaluator worker: not shipped yet" in out
+    assert "evaluator: available" in out
     rc, out = _run(["evolve"])
     assert rc == 0
     assert "代码缺陷修复" in out
@@ -89,6 +89,40 @@ def test_evolve_task_round_trip() -> None:
     policy = cfgmod.load_config().evolution_tasks["代码缺陷修复"]
     assert policy["enabled"] is True
     assert policy["promotion"] == "manual"
+
+
+def test_pack_cli_requires_explicit_attempt_and_round_trips_bundle() -> None:
+    _iso_home()
+    from pathlib import Path
+    from telos.config import telos_home
+    from telos.tracing import SQLiteTraceStore
+
+    home = telos_home()
+    with SQLiteTraceStore(home / "telos.db") as store:
+        task = store.ensure_task_type("code-defect-repair")
+        run = store.create_task_run(goal="fix tabs", task_type_id=task["id"])
+        attempt = store.create_attempt(task_run_id=run["id"], harness="codex")
+
+    rc, out = _run(["pack", "--attempt", attempt["id"], "--no-workspace", "--done", "reproduced", "--next", "patch"])
+    assert rc == 0
+    pack_id = out.split("created Context Pack ", 1)[1].splitlines()[0]
+    bundle = Path(home) / "task.telosbundle"
+    rc, out = _run(["pack", "export", pack_id, "-o", str(bundle)])
+    assert rc == 0 and bundle.exists()
+    rc, out = _run(["pack", "inspect", pack_id])
+    assert rc == 0 and "progress     included" in out
+
+
+def test_run_start_creates_profile_task_and_attempt() -> None:
+    _iso_home()
+    rc, out = _run([
+        "run", "start", "--task", "code-defect-repair", "--goal", "fix tabs",
+        "--harness", "codex", "--no-exec",
+    ])
+    assert rc == 0
+    assert "TaskRun " in out and "Attempt " in out and "TELOS_ATTEMPT_ID=" in out
+    rc, listed = _run(["run", "list"])
+    assert rc == 0 and "fix tabs" in listed and "code-defect-repair" in listed
 
 
 def test_trace_hook_dispatches_supported_hooks() -> None:

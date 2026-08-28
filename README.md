@@ -15,7 +15,7 @@
 [![Status](https://img.shields.io/badge/status-Beta-d8851f?style=flat-square)](CHANGELOG.md)
 [![Version](https://img.shields.io/badge/version-0.1.8-4FB3BF?style=flat-square)](CHANGELOG.md)
 
-[**Quickstart**](#quickstart) &nbsp;·&nbsp; [**How it works**](#how-it-works) &nbsp;·&nbsp; [**Savings**](#cost-optimization) &nbsp;·&nbsp; [**What ships today**](#what-ships-today) &nbsp;·&nbsp; [**Design**](docs/adr/0002-opik-style-agent-tracing-platform.md)
+[**Quickstart**](#quickstart) &nbsp;·&nbsp; [**How it works**](#how-it-works) &nbsp;·&nbsp; [**Savings**](#cost-optimization) &nbsp;·&nbsp; [**What ships today**](#what-ships-today) &nbsp;·&nbsp; [**Context design**](docs/adr/0003-portable-context-pack-and-self-evolution.md)
 
 **📖 English** &nbsp;|&nbsp; [🇨🇳 中文](README.zh-CN.md)
 
@@ -42,18 +42,20 @@ Prompt-cache optimization remains part of TELOS. It is now one runtime primitive
 
 ```mermaid
 flowchart LR
-    H["Agent harness<br/>Codex · DeepSeek Harness · others"] --> G["Local TELOS gateway"]
+    C["Immutable Context Pack"] --> H["Attempt<br/>Codex · Kimi Code · DeepSeek Harness"]
+    H -->|"handoff"| C
+    H --> G["Local TELOS gateway"]
     G --> M["Your model provider"]
     H -->|"native hooks / telemetry"| T["Thread → Trace → Span"]
     G -->|"model spans"| T
     T --> D[("Local SQLite")]
-    T --> R["Replay and regression cases"]
+    T --> R["Frozen regression cases"]
     R --> E["Offline evaluation"]
-    E --> O["Prompt · Tool · Workflow · Model routing candidates"]
-    O -. "manual promotion" .-> H
+    E --> O["Agent Profile Candidate"]
+    O -. "manual promote / rollback" .-> H
 ```
 
-The **tracing database** is the single default record: it stores Harness and model lifecycles as queryable `Thread → Trace → Span` trees, including replayable raw LLM requests, tools, subagents, approvals, usage, TTFT, and errors. The old JSONL corpus remains an explicit `--record-corpus` compatibility option.
+`TaskType → TaskRun → Attempt` owns task identity above Harness sessions. An immutable Context Pack captures objective, policy, progress, memory, normalized conversation, workspace state, and provenance; Trace trees remain the evidence layer. Open `http://127.0.0.1:7171/__telos/` for the Context Control Plane and `.../__telos/traces` for raw evidence.
 
 <a id="what-ships-today"></a>
 
@@ -64,13 +66,14 @@ The **tracing database** is the single default record: it stores Harness and mod
 | Inject the local gateway into Codex, Claude Code, OpenClaw, and Hermes | **Available** |
 | Replay SQLite LLM spans across modes; optional legacy corpus compatibility | **Available** |
 | SQLite Trace/Span store, authenticated batch ingest, and local Trace Explorer | **Available** |
-| Native Codex hooks and DeepSeek Harness telemetry adapters | **Available** |
-| `telos evolve --task` task-type policy with offline evaluation and manual promotion settings | **Available** |
-| Additional native Harness tracing adapters | **Next** |
-| Automatic outcome labeling, failure attribution, regression generation, and candidate evaluation | **Next** |
-| SFT/RL dataset export | **Planned** |
+| Native Codex, Kimi Code, and DeepSeek Harness tracing adapters | **Available** |
+| Deterministic Context Pack, `.telosbundle`, secret/path/checksum validation | **Available** |
+| Codex ↔ Kimi handoff with explicit capability degradation and Attempt lineage | **Available** |
+| Context/Runs/Evolution/Evidence local control plane | **Available** |
+| Frozen outcomes, single-dimension Candidates, cross-Harness gates, promote/rollback | **Available** |
+| SFT, preference, and RL JSONL export | **Available** |
 
-The current `evolve` command configures the evolution policy. It does **not** yet run an evaluator worker or modify production agent behavior.
+Evaluation is explicit and offline: TELOS never promotes a Candidate automatically. `telos evolve run` executes the frozen matrix; `promote` and `rollback` only move the audited production pointer.
 
 <a id="quickstart"></a>
 
@@ -81,11 +84,16 @@ The current `evolve` command configures the evolution policy. It does **not** ye
 curl -fsSL https://raw.githubusercontent.com/learningCatHD/telos-sdk/main/scripts/install.sh | bash
 # Or: uv pip install -U telos-sdk
 
-# Connect one harness. Future Codex processes route through the local gateway.
+# Connect Harness adapters and start the local gateway.
 telos init --harness codex
+telos init --harness kimi-code
 
-# Opt a task type into the offline-evolution policy.
-telos evolve --task "code defect repair"
+# Create one TaskRun and enter Codex with an explicit Attempt identity.
+telos run start --task code-defect-repair --goal "fix persistent tabs" --harness codex
+
+# From that session, checkpoint and continue in Kimi Code.
+telos pack --done "reproduced" --next "patch refresh" --decision "selection is UI state"
+telos handoff kimi-code --pack <pack-id>
 
 # Inspect harness injection, gateway state, and traffic forwarding.
 telos status
@@ -106,8 +114,12 @@ TELOS persists its state under `~/.telos/`:
 | Path | Contents |
 |---|---|
 | `config.json` | Gateway, Harness Trace, and evolution policies; includes per-Harness tracing tokens |
+| `control.token` | mode `0600` write token for local control-plane mutations |
+| `packs/` | immutable Context Pack directories |
+| `profiles/` | immutable Agent Profile Revision directories |
+| `runs/` | temporary, TELOS-owned handoff Launch Plans |
 | `corpus/` | Optional legacy raw-request corpus (`--record-corpus` only) |
-| `telos.db` | SQLite projects, threads, traces, spans, and feedback |
+| `telos.db` | SQLite TaskRuns, Attempts, packs, profiles, evaluations, traces, spans, and feedback |
 | `usage.jsonl` | Token usage and cost metrics |
 
 These files can contain prompts, source code, tool results, and credentials present in model requests. Protect the directory as sensitive data. TELOS does not upload it to a TELOS service, but your configured model provider still receives the requests needed for inference.

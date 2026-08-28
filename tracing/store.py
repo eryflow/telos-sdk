@@ -145,6 +145,145 @@ CREATE INDEX idx_feedback_trace ON feedback_scores(trace_id, created_at_us);
 CREATE INDEX idx_feedback_span ON feedback_scores(span_id, created_at_us);
 """
 
+_MIGRATION_2 = """
+CREATE TABLE task_types (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    production_profile_revision_id TEXT,
+    evolution_policy_json TEXT NOT NULL DEFAULT '{}',
+    created_at_us INTEGER NOT NULL,
+    last_updated_at_us INTEGER NOT NULL
+);
+CREATE TABLE profile_revisions (
+    id TEXT PRIMARY KEY,
+    task_type_id TEXT NOT NULL REFERENCES task_types(id) ON DELETE CASCADE,
+    parent_revision_id TEXT REFERENCES profile_revisions(id),
+    digest TEXT NOT NULL UNIQUE,
+    state TEXT NOT NULL CHECK (state IN ('draft','evaluating','recommended','production','rejected','rolled_back')),
+    change_dimension TEXT,
+    path TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at_us INTEGER NOT NULL,
+    last_updated_at_us INTEGER NOT NULL
+);
+CREATE TABLE task_runs (
+    id TEXT PRIMARY KEY,
+    task_type_id TEXT REFERENCES task_types(id),
+    goal TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('running','ok','error','cancelled','abandoned','unknown')),
+    workspace_json TEXT NOT NULL DEFAULT '{}',
+    created_at_us INTEGER NOT NULL,
+    finished_at_us INTEGER,
+    last_updated_at_us INTEGER NOT NULL
+);
+CREATE TABLE context_packs (
+    id TEXT PRIMARY KEY,
+    digest TEXT NOT NULL UNIQUE,
+    parent_pack_id TEXT REFERENCES context_packs(id),
+    task_run_id TEXT NOT NULL REFERENCES task_runs(id) ON DELETE CASCADE,
+    source_attempt_id TEXT REFERENCES attempts(id),
+    profile_revision_id TEXT REFERENCES profile_revisions(id),
+    schema_version INTEGER NOT NULL,
+    capture_status TEXT NOT NULL CHECK (capture_status IN ('complete','partial','dirty','invalid')),
+    capture_method TEXT NOT NULL CHECK (capture_method IN ('native','cooperative','reconstructed','assisted')),
+    path TEXT NOT NULL,
+    manifest_json TEXT NOT NULL,
+    created_at_us INTEGER NOT NULL
+);
+CREATE TABLE attempts (
+    id TEXT PRIMARY KEY,
+    task_run_id TEXT NOT NULL REFERENCES task_runs(id) ON DELETE CASCADE,
+    harness TEXT NOT NULL,
+    source_attempt_id TEXT REFERENCES attempts(id),
+    context_pack_id TEXT REFERENCES context_packs(id),
+    profile_revision_id TEXT REFERENCES profile_revisions(id),
+    status TEXT NOT NULL CHECK (status IN ('planned','running','ok','error','cancelled','abandoned','unknown')),
+    launch_plan_json TEXT NOT NULL DEFAULT '{}',
+    started_at_us INTEGER,
+    finished_at_us INTEGER,
+    created_at_us INTEGER NOT NULL,
+    last_updated_at_us INTEGER NOT NULL
+);
+CREATE TABLE handoffs (
+    id TEXT PRIMARY KEY,
+    task_run_id TEXT NOT NULL REFERENCES task_runs(id) ON DELETE CASCADE,
+    source_attempt_id TEXT REFERENCES attempts(id),
+    destination_attempt_id TEXT REFERENCES attempts(id),
+    context_pack_id TEXT NOT NULL REFERENCES context_packs(id),
+    destination_harness TEXT NOT NULL,
+    compatibility_json TEXT NOT NULL,
+    reason TEXT,
+    status TEXT NOT NULL CHECK (status IN ('planned','running','ok','error','blocked')),
+    created_at_us INTEGER NOT NULL,
+    last_updated_at_us INTEGER NOT NULL
+);
+CREATE TABLE outcome_resolutions (
+    id TEXT PRIMARY KEY,
+    task_run_id TEXT NOT NULL REFERENCES task_runs(id) ON DELETE CASCADE,
+    attempt_id TEXT REFERENCES attempts(id),
+    outcome TEXT NOT NULL CHECK (outcome IN ('pass','fail','unknown')),
+    classification TEXT,
+    score REAL,
+    evidence_json TEXT NOT NULL DEFAULT '{}',
+    frozen INTEGER NOT NULL DEFAULT 0 CHECK (frozen IN (0,1)),
+    created_at_us INTEGER NOT NULL,
+    last_updated_at_us INTEGER NOT NULL
+);
+CREATE TABLE regression_cases (
+    id TEXT PRIMARY KEY,
+    task_type_id TEXT NOT NULL REFERENCES task_types(id) ON DELETE CASCADE,
+    pack_id TEXT NOT NULL REFERENCES context_packs(id),
+    outcome_resolution_id TEXT NOT NULL REFERENCES outcome_resolutions(id),
+    digest TEXT NOT NULL UNIQUE,
+    protected INTEGER NOT NULL DEFAULT 0 CHECK (protected IN (0,1)),
+    policy_json TEXT NOT NULL DEFAULT '{}',
+    created_at_us INTEGER NOT NULL
+);
+CREATE TABLE evaluation_runs (
+    id TEXT PRIMARY KEY,
+    task_type_id TEXT NOT NULL REFERENCES task_types(id) ON DELETE CASCADE,
+    reference_revision_id TEXT NOT NULL REFERENCES profile_revisions(id),
+    candidate_revision_id TEXT NOT NULL REFERENCES profile_revisions(id),
+    status TEXT NOT NULL CHECK (status IN ('planned','running','passed','failed','error')),
+    gates_json TEXT NOT NULL DEFAULT '{}',
+    created_at_us INTEGER NOT NULL,
+    finished_at_us INTEGER,
+    last_updated_at_us INTEGER NOT NULL
+);
+CREATE TABLE evaluation_results (
+    id TEXT PRIMARY KEY,
+    evaluation_run_id TEXT NOT NULL REFERENCES evaluation_runs(id) ON DELETE CASCADE,
+    regression_case_id TEXT NOT NULL REFERENCES regression_cases(id),
+    harness TEXT NOT NULL,
+    variant TEXT NOT NULL CHECK (variant IN ('reference','candidate')),
+    attempt_id TEXT REFERENCES attempts(id),
+    outcome TEXT NOT NULL CHECK (outcome IN ('pass','fail','error')),
+    score REAL NOT NULL,
+    cost_usd_micros INTEGER NOT NULL DEFAULT 0,
+    latency_us INTEGER NOT NULL DEFAULT 0,
+    evidence_json TEXT NOT NULL DEFAULT '{}',
+    created_at_us INTEGER NOT NULL,
+    UNIQUE (evaluation_run_id, regression_case_id, harness, variant)
+);
+CREATE TABLE promotions (
+    id TEXT PRIMARY KEY,
+    task_type_id TEXT NOT NULL REFERENCES task_types(id) ON DELETE CASCADE,
+    from_revision_id TEXT REFERENCES profile_revisions(id),
+    to_revision_id TEXT NOT NULL REFERENCES profile_revisions(id),
+    action TEXT NOT NULL CHECK (action IN ('promote','rollback')),
+    created_at_us INTEGER NOT NULL
+);
+ALTER TABLE threads ADD COLUMN attempt_id TEXT REFERENCES attempts(id);
+ALTER TABLE traces ADD COLUMN attempt_id TEXT REFERENCES attempts(id);
+ALTER TABLE traces ADD COLUMN context_pack_id TEXT REFERENCES context_packs(id);
+ALTER TABLE traces ADD COLUMN profile_revision_id TEXT REFERENCES profile_revisions(id);
+CREATE INDEX idx_attempts_task_run_created ON attempts(task_run_id,created_at_us,id);
+CREATE INDEX idx_packs_task_run_created ON context_packs(task_run_id,created_at_us,id);
+CREATE INDEX idx_handoffs_task_run_created ON handoffs(task_run_id,created_at_us,id);
+CREATE INDEX idx_threads_attempt ON threads(attempt_id);
+CREATE INDEX idx_traces_attempt ON traces(attempt_id,start_time_us,id);
+"""
+
 
 def _required(body: Mapping[str, Any], key: str) -> Any:
     value = body.get(key)
@@ -231,6 +370,14 @@ class SQLiteTraceStore:
                 f"BEGIN IMMEDIATE;\n{_SCHEMA}\n"
                 f"INSERT INTO schema_migrations(version, applied_at_us) VALUES (1, {applied});\nCOMMIT;"
             )
+        current = self._connection.execute(
+            "SELECT COALESCE(MAX(version),0) FROM schema_migrations"
+        ).fetchone()[0]
+        if current < 2:
+            self._connection.executescript(
+                f"BEGIN IMMEDIATE;\n{_MIGRATION_2}\n"
+                f"INSERT INTO schema_migrations(version, applied_at_us) VALUES (2, {applied});\nCOMMIT;"
+            )
         with self._connection:
             self._connection.execute(
                 "INSERT OR IGNORE INTO projects(id,name,created_at_us,last_updated_at_us) VALUES (?,?,?,?)",
@@ -272,6 +419,691 @@ class SQLiteTraceStore:
             ).fetchone()
         assert row is not None
         return dict(row)
+
+    def ensure_task_type(
+        self, name: str, evolution_policy: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        name = name.strip()
+        if not name:
+            raise ValueError("task type name is required")
+        row_id = str(uuid5(NAMESPACE_URL, f"telos:task-type:{name}"))
+        timestamp = now_us()
+        with self._transaction():
+            row = self._connection.execute(
+                "SELECT * FROM task_types WHERE name=?", (name,)
+            ).fetchone()
+            if row is None:
+                self._connection.execute(
+                    """INSERT INTO task_types
+                       (id,name,evolution_policy_json,created_at_us,last_updated_at_us)
+                       VALUES (?,?,?,?,?)""",
+                    (row_id, name, _json(evolution_policy, {}), timestamp, timestamp),
+                )
+            elif evolution_policy is not None:
+                self._connection.execute(
+                    "UPDATE task_types SET evolution_policy_json=?,last_updated_at_us=? WHERE id=?",
+                    (_json(evolution_policy, {}), timestamp, row["id"]),
+                )
+                row_id = row["id"]
+            else:
+                row_id = row["id"]
+            row = self._connection.execute(
+                "SELECT * FROM task_types WHERE id=?", (row_id,)
+            ).fetchone()
+        assert row is not None
+        return self._decode_control_row(row)
+
+    def create_task_run(
+        self, *, goal: str, task_type_id: str | None = None,
+        workspace: Mapping[str, Any] | None = None, row_id: str | None = None,
+    ) -> dict[str, Any]:
+        goal = goal.strip()
+        if not goal:
+            raise ValueError("goal is required")
+        row_id, timestamp = row_id or str(uuid4()), now_us()
+        with self._transaction():
+            self._validate_reference("task_types", task_type_id, "task_type_id")
+            self._connection.execute(
+                """INSERT INTO task_runs
+                   (id,task_type_id,goal,status,workspace_json,created_at_us,last_updated_at_us)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (row_id, task_type_id, goal, "running", _json(workspace, {}),
+                 timestamp, timestamp),
+            )
+            row = self._connection.execute(
+                "SELECT * FROM task_runs WHERE id=?", (row_id,)
+            ).fetchone()
+        assert row is not None
+        return self._decode_control_row(row)
+
+    def set_task_run_status(self, row_id: str, status: str) -> dict[str, Any]:
+        if status not in STATUSES:
+            raise ValueError(f"unsupported task run status: {status}")
+        timestamp = now_us()
+        with self._transaction():
+            row = self._validate_reference("task_runs", row_id, "task_run_id")
+            assert row is not None
+            finished = timestamp if status != "running" else None
+            self._connection.execute(
+                """UPDATE task_runs SET status=?,finished_at_us=?,last_updated_at_us=?
+                   WHERE id=?""",
+                (_status_after(row["status"], status), finished, timestamp, row_id),
+            )
+            row = self._connection.execute(
+                "SELECT * FROM task_runs WHERE id=?", (row_id,)
+            ).fetchone()
+        assert row is not None
+        return self._decode_control_row(row)
+
+    def create_attempt(
+        self, *, task_run_id: str, harness: str, source_attempt_id: str | None = None,
+        context_pack_id: str | None = None, profile_revision_id: str | None = None,
+        launch_plan: Mapping[str, Any] | None = None, status: str = "planned",
+        row_id: str | None = None,
+    ) -> dict[str, Any]:
+        harness = harness.strip()
+        if not harness:
+            raise ValueError("harness is required")
+        if status not in {"planned", *STATUSES}:
+            raise ValueError(f"unsupported attempt status: {status}")
+        row_id, timestamp = row_id or str(uuid4()), now_us()
+        with self._transaction():
+            task_run = self._validate_reference("task_runs", task_run_id, "task_run_id")
+            source = self._validate_reference("attempts", source_attempt_id, "source_attempt_id")
+            pack = self._validate_reference("context_packs", context_pack_id, "context_pack_id")
+            if profile_revision_id is None and task_run["task_type_id"] is not None:
+                task_type = self._validate_reference(
+                    "task_types", task_run["task_type_id"], "task_type_id"
+                )
+                profile_revision_id = task_type["production_profile_revision_id"]
+            profile = self._validate_reference(
+                "profile_revisions", profile_revision_id, "profile_revision_id"
+            )
+            for related, label in ((source, "source attempt"), (pack, "context pack")):
+                if related is not None and related["task_run_id"] != task_run_id:
+                    raise ValueError(f"{label} belongs to another task run")
+            if profile is not None and task_run["task_type_id"] != profile["task_type_id"]:
+                raise ValueError("profile revision belongs to another task type")
+            started = timestamp if status == "running" else None
+            finished = timestamp if status in _FINAL_STATUSES else None
+            self._connection.execute(
+                """INSERT INTO attempts
+                   (id,task_run_id,harness,source_attempt_id,context_pack_id,
+                    profile_revision_id,status,launch_plan_json,started_at_us,finished_at_us,
+                    created_at_us,last_updated_at_us)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (row_id, task_run_id, harness, source_attempt_id, context_pack_id,
+                 profile_revision_id, status, _json(launch_plan, {}), started, finished,
+                 timestamp, timestamp),
+            )
+            row = self._connection.execute(
+                "SELECT * FROM attempts WHERE id=?", (row_id,)
+            ).fetchone()
+        assert row is not None
+        return self._decode_control_row(row)
+
+    def set_attempt_status(self, row_id: str, status: str) -> dict[str, Any]:
+        if status not in {"planned", *STATUSES}:
+            raise ValueError(f"unsupported attempt status: {status}")
+        timestamp = now_us()
+        with self._transaction():
+            current = self._validate_reference("attempts", row_id, "attempt_id")
+            assert current is not None
+            if current["status"] in _FINAL_STATUSES:
+                status = current["status"]
+            started = current["started_at_us"] or (timestamp if status == "running" else None)
+            finished = current["finished_at_us"] or (
+                timestamp if status in _FINAL_STATUSES else None
+            )
+            self._connection.execute(
+                """UPDATE attempts SET status=?,started_at_us=?,finished_at_us=?,
+                   last_updated_at_us=? WHERE id=?""",
+                (status, started, finished, timestamp, row_id),
+            )
+            row = self._connection.execute(
+                "SELECT * FROM attempts WHERE id=?", (row_id,)
+            ).fetchone()
+        assert row is not None
+        return self._decode_control_row(row)
+
+    def register_context_pack(
+        self, manifest: Mapping[str, Any], path: str | Path, *, detached: bool = False,
+    ) -> dict[str, Any]:
+        required = (
+            "pack_id", "digest", "task_run_id", "schema_version",
+            "capture_status", "capture_method",
+        )
+        for key in required:
+            _required(manifest, key)
+        owned_path = self._owned_path(path)
+        timestamp = now_us()
+        with self._transaction():
+            task_run_id = str(manifest["task_run_id"])
+            self._validate_reference("task_runs", task_run_id, "task_run_id")
+            parent_id = manifest.get("parent_pack_id")
+            source_id = manifest.get("source_attempt_id")
+            profile_id = manifest.get("profile_revision_id")
+            if detached:
+                parent_id = parent_id if self._connection.execute(
+                    "SELECT 1 FROM context_packs WHERE id=?", (parent_id,)
+                ).fetchone() else None
+                source_id = source_id if self._connection.execute(
+                    "SELECT 1 FROM attempts WHERE id=?", (source_id,)
+                ).fetchone() else None
+                profile_id = profile_id if self._connection.execute(
+                    "SELECT 1 FROM profile_revisions WHERE id=?", (profile_id,)
+                ).fetchone() else None
+            source = self._validate_reference("attempts", source_id, "source_attempt_id")
+            if source is not None and source["task_run_id"] != task_run_id:
+                raise ValueError("source attempt belongs to another task run")
+            self._validate_reference("context_packs", parent_id, "parent_pack_id")
+            self._validate_reference("profile_revisions", profile_id, "profile_revision_id")
+            self._connection.execute(
+                """INSERT INTO context_packs
+                   (id,digest,parent_pack_id,task_run_id,source_attempt_id,
+                    profile_revision_id,schema_version,capture_status,capture_method,
+                    path,manifest_json,created_at_us)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (str(manifest["pack_id"]), str(manifest["digest"]), parent_id,
+                 task_run_id, source_id, profile_id,
+                 int(manifest["schema_version"]), str(manifest["capture_status"]),
+                 str(manifest["capture_method"]), str(owned_path),
+                 _json(manifest, {}), timestamp),
+            )
+            row = self._connection.execute(
+                "SELECT * FROM context_packs WHERE id=?", (manifest["pack_id"],)
+            ).fetchone()
+        assert row is not None
+        return self._decode_control_row(row)
+
+    def create_handoff(
+        self, *, task_run_id: str, context_pack_id: str, destination_harness: str,
+        compatibility: Mapping[str, Any], source_attempt_id: str | None = None,
+        destination_attempt_id: str | None = None, reason: str | None = None,
+        status: str = "planned", row_id: str | None = None,
+    ) -> dict[str, Any]:
+        if status not in {"planned", "running", "ok", "error", "blocked"}:
+            raise ValueError(f"unsupported handoff status: {status}")
+        row_id, timestamp = row_id or str(uuid4()), now_us()
+        with self._transaction():
+            self._validate_reference("task_runs", task_run_id, "task_run_id")
+            for table, value, label in (
+                ("context_packs", context_pack_id, "context_pack_id"),
+                ("attempts", source_attempt_id, "source_attempt_id"),
+                ("attempts", destination_attempt_id, "destination_attempt_id"),
+            ):
+                row = self._validate_reference(table, value, label)
+                if row is not None and row["task_run_id"] != task_run_id:
+                    raise ValueError(f"{label} belongs to another task run")
+            self._connection.execute(
+                """INSERT INTO handoffs
+                   (id,task_run_id,source_attempt_id,destination_attempt_id,
+                    context_pack_id,destination_harness,compatibility_json,reason,status,
+                    created_at_us,last_updated_at_us)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (row_id, task_run_id, source_attempt_id, destination_attempt_id,
+                 context_pack_id, destination_harness, _json(compatibility, {}), reason,
+                 status, timestamp, timestamp),
+            )
+            row = self._connection.execute(
+                "SELECT * FROM handoffs WHERE id=?", (row_id,)
+            ).fetchone()
+        assert row is not None
+        return self._decode_control_row(row)
+
+    def get_task_run(self, row_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            run = self._connection.execute(
+                "SELECT * FROM task_runs WHERE id=?", (row_id,)
+            ).fetchone()
+            if run is None:
+                return None
+            attempts = self._connection.execute(
+                "SELECT * FROM attempts WHERE task_run_id=? ORDER BY created_at_us,id",
+                (row_id,),
+            ).fetchall()
+            packs = self._connection.execute(
+                "SELECT * FROM context_packs WHERE task_run_id=? ORDER BY created_at_us,id",
+                (row_id,),
+            ).fetchall()
+            handoffs = self._connection.execute(
+                "SELECT * FROM handoffs WHERE task_run_id=? ORDER BY created_at_us,id",
+                (row_id,),
+            ).fetchall()
+            traces = self._connection.execute(
+                """SELECT t.id,t.attempt_id,t.name,t.harness,t.status,t.start_time_us
+                   FROM traces t JOIN attempts a ON a.id=t.attempt_id
+                   WHERE a.task_run_id=? ORDER BY t.start_time_us,t.id""",
+                (row_id,),
+            ).fetchall()
+        return {
+            "task_run": self._decode_control_row(run),
+            "attempts": [self._decode_control_row(row) for row in attempts],
+            "packs": [self._decode_control_row(row) for row in packs],
+            "handoffs": [self._decode_control_row(row) for row in handoffs],
+            "traces": [dict(row) for row in traces],
+        }
+
+    def list_task_runs(self, limit: int = 50) -> list[dict[str, Any]]:
+        if not 1 <= limit <= 200:
+            raise ValueError("limit must be between 1 and 200")
+        with self._lock:
+            rows = self._connection.execute(
+                """SELECT r.*,tt.name AS task_type_name,
+                          COUNT(DISTINCT a.id) AS attempt_count,
+                          COUNT(DISTINCT p.id) AS pack_count
+                   FROM task_runs r LEFT JOIN task_types tt ON tt.id=r.task_type_id
+                   LEFT JOIN attempts a ON a.task_run_id=r.id
+                   LEFT JOIN context_packs p ON p.task_run_id=r.id
+                   GROUP BY r.id ORDER BY r.created_at_us DESC,r.id DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [self._decode_control_row(row) for row in rows]
+
+    def get_context_pack(self, row_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM context_packs WHERE id=?", (row_id,)
+            ).fetchone()
+        return None if row is None else self._decode_control_row(row)
+
+    def list_context_packs(self, limit: int = 50) -> list[dict[str, Any]]:
+        if not 1 <= limit <= 200:
+            raise ValueError("limit must be between 1 and 200")
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM context_packs ORDER BY created_at_us DESC,id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [self._decode_control_row(row) for row in rows]
+
+    def get_attempt(self, row_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM attempts WHERE id=?", (row_id,)
+            ).fetchone()
+        return None if row is None else self._decode_control_row(row)
+
+    def check_attempt_trace_integrity(self, row_id: str) -> dict[str, Any]:
+        with self._lock:
+            attempt = self._connection.execute(
+                "SELECT * FROM attempts WHERE id=?", (row_id,)
+            ).fetchone()
+            if attempt is None:
+                raise ValueError(f"attempt_id does not exist: {row_id}")
+            traces = self._connection.execute(
+                "SELECT * FROM traces WHERE attempt_id=?", (row_id,)
+            ).fetchall()
+            llm_count = self._connection.execute(
+                """SELECT COUNT(*) FROM spans s JOIN traces t ON t.id=s.trace_id
+                   WHERE t.attempt_id=? AND s.type='llm'""", (row_id,)
+            ).fetchone()[0]
+            duplicates = self._connection.execute(
+                """SELECT s.trace_id,s.external_id,COUNT(*) AS n FROM spans s
+                   JOIN traces t ON t.id=s.trace_id
+                   WHERE t.attempt_id=? AND s.type='llm'
+                   GROUP BY s.trace_id,s.external_id HAVING COUNT(*)>1""", (row_id,)
+            ).fetchall()
+        reasons = []
+        if not traces:
+            reasons.append("no Trace is linked to the evaluation Attempt")
+        if llm_count == 0:
+            reasons.append("no authoritative LLM Span is linked to the evaluation Attempt")
+        for trace in traces:
+            if trace["context_pack_id"] != attempt["context_pack_id"]:
+                reasons.append(f"Trace {trace['id']} has the wrong Context Pack")
+            if trace["profile_revision_id"] != attempt["profile_revision_id"]:
+                reasons.append(f"Trace {trace['id']} has the wrong Profile Revision")
+        if duplicates:
+            reasons.append("duplicate authoritative LLM Span identities were found")
+        return {"passed": not reasons, "trace_count": len(traces),
+                "llm_span_count": llm_count, "reasons": reasons}
+
+    def get_attempt_evidence(self, row_id: str, limit: int = 20) -> dict[str, Any]:
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
+        with self._lock:
+            self._validate_reference("attempts", row_id, "attempt_id")
+            rows = self._connection.execute(
+                """SELECT * FROM traces WHERE attempt_id=?
+                   ORDER BY start_time_us DESC,id DESC LIMIT ?""", (row_id, limit),
+            ).fetchall()
+        traces = [self._decode_entity(row) for row in reversed(rows)]
+        conversation = []
+        for trace in traces:
+            if trace.get("input") is not None:
+                conversation.append({"role": "user", "content": trace["input"],
+                                     "trace_id": trace["id"]})
+            if trace.get("output") is not None:
+                conversation.append({"role": "assistant", "content": trace["output"],
+                                     "trace_id": trace["id"]})
+        return {
+            "trace_ids": [trace["id"] for trace in traces],
+            "completed_turns": sum(trace["status"] == "ok" for trace in traces),
+            "conversation": conversation,
+            "last_output": next(
+                (trace["output"] for trace in reversed(traces) if trace.get("output") is not None),
+                None,
+            ),
+        }
+
+    def create_profile_revision(
+        self, *, task_type_id: str, digest: str, path: str | Path,
+        parent_revision_id: str | None = None, state: str = "draft",
+        change_dimension: str | None = None, metadata: Mapping[str, Any] | None = None,
+        row_id: str | None = None,
+    ) -> dict[str, Any]:
+        states = {"draft", "evaluating", "recommended", "production", "rejected", "rolled_back"}
+        if state not in states:
+            raise ValueError(f"unsupported profile revision state: {state}")
+        owned_path = self._owned_path(path)
+        row_id, timestamp = row_id or str(uuid4()), now_us()
+        with self._transaction():
+            task_type = self._validate_reference("task_types", task_type_id, "task_type_id")
+            parent = self._validate_reference(
+                "profile_revisions", parent_revision_id, "parent_revision_id"
+            )
+            if parent is not None and parent["task_type_id"] != task_type_id:
+                raise ValueError("parent revision belongs to another task type")
+            if state == "production" and task_type["production_profile_revision_id"] is not None:
+                raise ValueError("task type already has a production profile")
+            self._connection.execute(
+                """INSERT INTO profile_revisions
+                   (id,task_type_id,parent_revision_id,digest,state,change_dimension,
+                    path,metadata_json,created_at_us,last_updated_at_us)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (row_id, task_type_id, parent_revision_id, digest, state,
+                 change_dimension, str(owned_path), _json(metadata, {}), timestamp, timestamp),
+            )
+            if state == "production":
+                self._connection.execute(
+                    """UPDATE task_types SET production_profile_revision_id=?,last_updated_at_us=?
+                       WHERE id=?""", (row_id, timestamp, task_type_id),
+                )
+            row = self._connection.execute(
+                "SELECT * FROM profile_revisions WHERE id=?", (row_id,)
+            ).fetchone()
+        assert row is not None
+        return self._decode_control_row(row)
+
+    def get_profile_revision(self, row_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM profile_revisions WHERE id=?", (row_id,)
+            ).fetchone()
+        return None if row is None else self._decode_control_row(row)
+
+    def find_profile_revision_by_digest(self, digest: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM profile_revisions WHERE digest=?", (digest,)
+            ).fetchone()
+        return None if row is None else self._decode_control_row(row)
+
+    def resolve_outcome(
+        self, *, task_run_id: str, outcome: str, attempt_id: str | None = None,
+        classification: str | None = None, score: float | None = None,
+        evidence: Mapping[str, Any] | None = None, frozen: bool = False,
+        row_id: str | None = None,
+    ) -> dict[str, Any]:
+        if outcome not in {"pass", "fail", "unknown"}:
+            raise ValueError(f"unsupported outcome: {outcome}")
+        if score is not None and (isinstance(score, bool) or not math.isfinite(score)):
+            raise ValueError("score must be finite")
+        row_id, timestamp = row_id or str(uuid4()), now_us()
+        with self._transaction():
+            self._validate_reference("task_runs", task_run_id, "task_run_id")
+            attempt = self._validate_reference("attempts", attempt_id, "attempt_id")
+            if attempt is not None and attempt["task_run_id"] != task_run_id:
+                raise ValueError("attempt belongs to another task run")
+            self._connection.execute(
+                """INSERT INTO outcome_resolutions
+                   (id,task_run_id,attempt_id,outcome,classification,score,evidence_json,
+                    frozen,created_at_us,last_updated_at_us)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (row_id, task_run_id, attempt_id, outcome, classification, score,
+                 _json(evidence, {}), int(frozen), timestamp, timestamp),
+            )
+            row = self._connection.execute(
+                "SELECT * FROM outcome_resolutions WHERE id=?", (row_id,)
+            ).fetchone()
+        assert row is not None
+        return self._decode_control_row(row)
+
+    def freeze_regression_case(
+        self, *, task_type_id: str, pack_id: str, outcome_resolution_id: str,
+        digest: str, protected: bool = False, policy: Mapping[str, Any] | None = None,
+        row_id: str | None = None,
+    ) -> dict[str, Any]:
+        row_id, timestamp = row_id or str(uuid4()), now_us()
+        with self._transaction():
+            self._validate_reference("task_types", task_type_id, "task_type_id")
+            pack = self._validate_reference("context_packs", pack_id, "pack_id")
+            outcome = self._validate_reference(
+                "outcome_resolutions", outcome_resolution_id, "outcome_resolution_id"
+            )
+            run = self._validate_reference("task_runs", pack["task_run_id"], "task_run_id")
+            if run["task_type_id"] != task_type_id or outcome["task_run_id"] != run["id"]:
+                raise ValueError("regression case facts do not share one task type/run")
+            if outcome["outcome"] == "unknown":
+                raise ValueError("an unknown outcome cannot become a regression case")
+            self._connection.execute(
+                "UPDATE outcome_resolutions SET frozen=1,last_updated_at_us=? WHERE id=?",
+                (timestamp, outcome_resolution_id),
+            )
+            self._connection.execute(
+                """INSERT INTO regression_cases
+                   (id,task_type_id,pack_id,outcome_resolution_id,digest,protected,
+                    policy_json,created_at_us) VALUES (?,?,?,?,?,?,?,?)""",
+                (row_id, task_type_id, pack_id, outcome_resolution_id, digest,
+                 int(protected), _json(policy, {}), timestamp),
+            )
+            row = self._connection.execute(
+                "SELECT * FROM regression_cases WHERE id=?", (row_id,)
+            ).fetchone()
+        assert row is not None
+        return self._decode_control_row(row)
+
+    def create_evaluation_run(
+        self, *, task_type_id: str, reference_revision_id: str,
+        candidate_revision_id: str, row_id: str | None = None,
+    ) -> dict[str, Any]:
+        row_id, timestamp = row_id or str(uuid4()), now_us()
+        with self._transaction():
+            self._validate_reference("task_types", task_type_id, "task_type_id")
+            reference = self._validate_reference(
+                "profile_revisions", reference_revision_id, "reference_revision_id"
+            )
+            candidate = self._validate_reference(
+                "profile_revisions", candidate_revision_id, "candidate_revision_id"
+            )
+            if reference["task_type_id"] != task_type_id or candidate["task_type_id"] != task_type_id:
+                raise ValueError("evaluation revisions belong to another task type")
+            if candidate["state"] != "draft":
+                raise ValueError("candidate revision must be draft")
+            self._connection.execute(
+                "UPDATE profile_revisions SET state='evaluating',last_updated_at_us=? WHERE id=?",
+                (timestamp, candidate_revision_id),
+            )
+            self._connection.execute(
+                """INSERT INTO evaluation_runs
+                   (id,task_type_id,reference_revision_id,candidate_revision_id,status,
+                    created_at_us,last_updated_at_us) VALUES (?,?,?,?,?,?,?)""",
+                (row_id, task_type_id, reference_revision_id, candidate_revision_id,
+                 "running", timestamp, timestamp),
+            )
+            row = self._connection.execute(
+                "SELECT * FROM evaluation_runs WHERE id=?", (row_id,)
+            ).fetchone()
+        assert row is not None
+        return self._decode_control_row(row)
+
+    def add_evaluation_result(
+        self, *, evaluation_run_id: str, regression_case_id: str, harness: str,
+        variant: str, outcome: str, score: float, cost_usd_micros: int = 0,
+        latency_us: int = 0, attempt_id: str | None = None,
+        evidence: Mapping[str, Any] | None = None, row_id: str | None = None,
+    ) -> dict[str, Any]:
+        if variant not in {"reference", "candidate"} or outcome not in {"pass", "fail", "error"}:
+            raise ValueError("invalid evaluation variant or outcome")
+        if isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(score):
+            raise ValueError("score must be finite")
+        cost_usd_micros = _integer(cost_usd_micros, "cost_usd_micros", minimum=0)
+        latency_us = _integer(latency_us, "latency_us", minimum=0)
+        row_id, timestamp = row_id or str(uuid4()), now_us()
+        with self._transaction():
+            run = self._validate_reference("evaluation_runs", evaluation_run_id, "evaluation_run_id")
+            case = self._validate_reference("regression_cases", regression_case_id, "regression_case_id")
+            self._validate_reference("attempts", attempt_id, "attempt_id")
+            if run["status"] != "running" or case["task_type_id"] != run["task_type_id"]:
+                raise ValueError("evaluation is not running or case belongs to another task type")
+            self._connection.execute(
+                """INSERT INTO evaluation_results
+                   (id,evaluation_run_id,regression_case_id,harness,variant,attempt_id,
+                    outcome,score,cost_usd_micros,latency_us,evidence_json,created_at_us)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (row_id, evaluation_run_id, regression_case_id, harness, variant,
+                 attempt_id, outcome, float(score), cost_usd_micros, latency_us,
+                 _json(evidence, {}), timestamp),
+            )
+            row = self._connection.execute(
+                "SELECT * FROM evaluation_results WHERE id=?", (row_id,)
+            ).fetchone()
+        assert row is not None
+        return self._decode_control_row(row)
+
+    def finish_evaluation(
+        self, row_id: str, *, passed: bool, gates: Mapping[str, Any], error: bool = False,
+    ) -> dict[str, Any]:
+        timestamp = now_us()
+        status = "error" if error else "passed" if passed else "failed"
+        with self._transaction():
+            run = self._validate_reference("evaluation_runs", row_id, "evaluation_run_id")
+            if run["status"] != "running":
+                raise ValueError("evaluation run is already terminal")
+            self._connection.execute(
+                """UPDATE evaluation_runs SET status=?,gates_json=?,finished_at_us=?,
+                   last_updated_at_us=? WHERE id=?""",
+                (status, _json(gates, {}), timestamp, timestamp, row_id),
+            )
+            candidate_state = "recommended" if passed else "rejected"
+            self._connection.execute(
+                "UPDATE profile_revisions SET state=?,last_updated_at_us=? WHERE id=?",
+                (candidate_state, timestamp, run["candidate_revision_id"]),
+            )
+            row = self._connection.execute(
+                "SELECT * FROM evaluation_runs WHERE id=?", (row_id,)
+            ).fetchone()
+        assert row is not None
+        return self._decode_control_row(row)
+
+    def promote_profile(self, revision_id: str) -> dict[str, Any]:
+        timestamp = now_us()
+        with self._transaction():
+            revision = self._validate_reference(
+                "profile_revisions", revision_id, "profile_revision_id"
+            )
+            if revision["state"] != "recommended":
+                raise ValueError("only a recommended revision can be promoted")
+            task_type = self._validate_reference(
+                "task_types", revision["task_type_id"], "task_type_id"
+            )
+            previous = task_type["production_profile_revision_id"]
+            if previous:
+                self._connection.execute(
+                    "UPDATE profile_revisions SET state='rolled_back',last_updated_at_us=? WHERE id=?",
+                    (timestamp, previous),
+                )
+            self._connection.execute(
+                "UPDATE profile_revisions SET state='production',last_updated_at_us=? WHERE id=?",
+                (timestamp, revision_id),
+            )
+            self._connection.execute(
+                """UPDATE task_types SET production_profile_revision_id=?,last_updated_at_us=?
+                   WHERE id=?""", (revision_id, timestamp, revision["task_type_id"]),
+            )
+            promotion_id = str(uuid4())
+            self._connection.execute(
+                """INSERT INTO promotions
+                   (id,task_type_id,from_revision_id,to_revision_id,action,created_at_us)
+                   VALUES (?,?,?,?,?,?)""",
+                (promotion_id, revision["task_type_id"], previous, revision_id,
+                 "promote", timestamp),
+            )
+        return {"id": promotion_id, "from_revision_id": previous, "to_revision_id": revision_id}
+
+    def rollback_task_type(self, task_type_id: str) -> dict[str, Any]:
+        timestamp = now_us()
+        with self._transaction():
+            task_type = self._validate_reference("task_types", task_type_id, "task_type_id")
+            current = task_type["production_profile_revision_id"]
+            if current is None:
+                raise ValueError("task type has no production profile")
+            promotion = self._connection.execute(
+                """SELECT * FROM promotions WHERE task_type_id=? AND action='promote'
+                   AND to_revision_id=? AND from_revision_id IS NOT NULL
+                   ORDER BY created_at_us DESC,id DESC LIMIT 1""",
+                (task_type_id, current),
+            ).fetchone()
+            if promotion is None:
+                raise ValueError("no previous production revision to roll back to")
+            target = promotion["from_revision_id"]
+            self._connection.execute(
+                "UPDATE profile_revisions SET state='rolled_back',last_updated_at_us=? WHERE id=?",
+                (timestamp, current),
+            )
+            self._connection.execute(
+                "UPDATE profile_revisions SET state='production',last_updated_at_us=? WHERE id=?",
+                (timestamp, target),
+            )
+            self._connection.execute(
+                """UPDATE task_types SET production_profile_revision_id=?,last_updated_at_us=?
+                   WHERE id=?""", (target, timestamp, task_type_id),
+            )
+            rollback_id = str(uuid4())
+            self._connection.execute(
+                """INSERT INTO promotions
+                   (id,task_type_id,from_revision_id,to_revision_id,action,created_at_us)
+                   VALUES (?,?,?,?,?,?)""",
+                (rollback_id, task_type_id, current, target, "rollback", timestamp),
+            )
+        return {"id": rollback_id, "from_revision_id": current, "to_revision_id": target}
+
+    def get_evolution(self, task_type: str) -> dict[str, Any] | None:
+        with self._lock:
+            task = self._connection.execute(
+                "SELECT * FROM task_types WHERE id=? OR name=?", (task_type, task_type)
+            ).fetchone()
+            if task is None:
+                return None
+            revisions = self._connection.execute(
+                """SELECT * FROM profile_revisions WHERE task_type_id=?
+                   ORDER BY created_at_us DESC,id DESC""", (task["id"],)
+            ).fetchall()
+            cases = self._connection.execute(
+                """SELECT c.*,o.outcome,o.classification,o.score FROM regression_cases c
+                   JOIN outcome_resolutions o ON o.id=c.outcome_resolution_id
+                   WHERE c.task_type_id=? ORDER BY c.created_at_us DESC,c.id DESC""",
+                (task["id"],),
+            ).fetchall()
+            evaluations = self._connection.execute(
+                """SELECT * FROM evaluation_runs WHERE task_type_id=?
+                   ORDER BY created_at_us DESC,id DESC""", (task["id"],),
+            ).fetchall()
+            results = []
+            if evaluations:
+                results = self._connection.execute(
+                    """SELECT * FROM evaluation_results WHERE evaluation_run_id=?
+                       ORDER BY regression_case_id,harness,variant""",
+                    (evaluations[0]["id"],),
+                ).fetchall()
+        return {
+            "task_type": self._decode_control_row(task),
+            "revisions": [self._decode_control_row(row) for row in revisions],
+            "regression_cases": [self._decode_control_row(row) for row in cases],
+            "evaluations": [self._decode_control_row(row) for row in evaluations],
+            "latest_results": [self._decode_control_row(row) for row in results],
+        }
 
     def _upsert_project(self, body: Mapping[str, Any]) -> dict[str, Any]:
         project_id, name = str(_required(body, "id")), str(_required(body, "name"))
@@ -317,6 +1149,8 @@ class SQLiteTraceStore:
             _json(_sanitize_metadata(body.get("metadata")), {})
             if "metadata" in body else None
         )
+        attempt_id = body.get("attempt_id")
+        self._validate_reference("attempts", attempt_id, "attempt_id")
         existing = self._identity_row(
             "threads", row_id,
             "project_id=? AND harness=? AND external_id=?",
@@ -329,10 +1163,10 @@ class SQLiteTraceStore:
             self._connection.execute(
                 """INSERT INTO threads
                    (id,project_id,harness,external_id,name,status,start_time_us,end_time_us,
-                    metadata_json,created_at_us,last_updated_at_us)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    metadata_json,attempt_id,created_at_us,last_updated_at_us)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (row_id, project_id, harness, external_id, body.get("name"), status,
-                 start, end, metadata or "{}", timestamp, timestamp),
+                 start, end, metadata or "{}", attempt_id, timestamp, timestamp),
             )
             return {"id": row_id, "created": True, "updated": False}
         self._assert_identity(existing, project_id=project_id, harness=harness, external_id=external_id)
@@ -342,6 +1176,7 @@ class SQLiteTraceStore:
             "start_time_us": min(existing["start_time_us"], start),
             "end_time_us": end if end is not None else existing["end_time_us"],
             "metadata_json": metadata if metadata is not None else existing["metadata_json"],
+            "attempt_id": self._assignment(existing, "attempt_id", attempt_id),
         }
         result = self._update_changed("threads", existing, merged, timestamp)
         if existing["status"] == "running" and merged["status"] != "running":
@@ -383,6 +1218,19 @@ class SQLiteTraceStore:
         if project_id != thread["project_id"] or harness != thread["harness"]:
             raise ValueError("trace project/harness must match its thread")
         source, external_id = str(_required(body, "source")), str(_required(body, "external_id"))
+        attempt_id = body.get("attempt_id") or thread["attempt_id"]
+        context_pack_id = body.get("context_pack_id")
+        profile_revision_id = body.get("profile_revision_id")
+        if attempt_id is not None:
+            attempt = self._validate_reference("attempts", attempt_id, "attempt_id")
+            if context_pack_id is None:
+                context_pack_id = attempt["context_pack_id"]
+            if profile_revision_id is None:
+                profile_revision_id = attempt["profile_revision_id"]
+        self._validate_reference("context_packs", context_pack_id, "context_pack_id")
+        self._validate_reference(
+            "profile_revisions", profile_revision_id, "profile_revision_id"
+        )
         incoming = self._trace_values(body)
         existing = self._identity_row(
             "traces", row_id,
@@ -395,9 +1243,11 @@ class SQLiteTraceStore:
             incoming["tags_json"] = incoming["tags_json"] or "[]"
             columns = (
                 "id", "project_id", "thread_id", "harness", "source", "external_id",
+                "attempt_id", "context_pack_id", "profile_revision_id",
                 *incoming.keys(), "created_at_us", "last_updated_at_us",
             )
             values = (row_id, project_id, thread_id, harness, source, external_id,
+                      attempt_id, context_pack_id, profile_revision_id,
                       *incoming.values(), timestamp, timestamp)
             self._insert("traces", columns, values)
             return {"id": row_id, "created": True, "updated": False}
@@ -406,6 +1256,15 @@ class SQLiteTraceStore:
             source=source, external_id=external_id,
         )
         merged = self._merge_snapshot(existing, incoming)
+        merged.update({
+            "attempt_id": self._assignment(existing, "attempt_id", attempt_id),
+            "context_pack_id": self._assignment(
+                existing, "context_pack_id", context_pack_id
+            ),
+            "profile_revision_id": self._assignment(
+                existing, "profile_revision_id", profile_revision_id
+            ),
+        })
         return self._update_changed("traces", existing, merged, timestamp)
 
     def _trace_values(self, body: Mapping[str, Any]) -> dict[str, Any]:
@@ -544,6 +1403,34 @@ class SQLiteTraceStore:
         if parent["trace_id"] != trace_id:
             raise ValueError("parent span must belong to the same trace")
 
+    def _validate_reference(
+        self, table: str, row_id: Any, field: str,
+    ) -> sqlite3.Row | None:
+        if row_id is None:
+            return None
+        row = self._connection.execute(
+            f"SELECT * FROM {table} WHERE id=?", (str(row_id),)
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"{field} does not exist: {row_id}")
+        return row
+
+    def _owned_path(self, path: str | Path) -> Path:
+        root = self.path.parent.resolve()
+        candidate = Path(path).expanduser().resolve()
+        if root not in candidate.parents:
+            raise ValueError(f"control-plane path must stay under {root}")
+        return candidate
+
+    @staticmethod
+    def _assignment(existing: sqlite3.Row, field: str, incoming: Any) -> Any:
+        current = existing[field]
+        if incoming is None:
+            return current
+        if current is not None and current != incoming:
+            raise ValueError(f"{field} is immutable")
+        return incoming
+
     def _insert(self, table: str, columns: tuple[str, ...], values: tuple[Any, ...]) -> None:
         marks = ",".join("?" for _ in columns)
         self._connection.execute(
@@ -659,10 +1546,29 @@ class SQLiteTraceStore:
                    WHERE f.trace_id=? OR s.trace_id=? ORDER BY f.created_at_us,f.id""",
                 (trace_id, trace_id),
             ).fetchall()
+            attempt = None if trace["attempt_id"] is None else self._connection.execute(
+                "SELECT * FROM attempts WHERE id=?", (trace["attempt_id"],)
+            ).fetchone()
+            task_run = None if attempt is None else self._connection.execute(
+                "SELECT * FROM task_runs WHERE id=?", (attempt["task_run_id"],)
+            ).fetchone()
+            context_pack = None if trace["context_pack_id"] is None else self._connection.execute(
+                "SELECT * FROM context_packs WHERE id=?", (trace["context_pack_id"],)
+            ).fetchone()
+            profile = None if trace["profile_revision_id"] is None else self._connection.execute(
+                "SELECT * FROM profile_revisions WHERE id=?", (trace["profile_revision_id"],)
+            ).fetchone()
         return {
             "trace": self._decode_entity(trace),
             "spans": [self._decode_entity(row) for row in spans],
             "feedback_scores": [dict(row) for row in feedback],
+            "attempt": None if attempt is None else self._decode_control_row(attempt),
+            "task_run": None if task_run is None else self._decode_control_row(task_run),
+            "context_pack": (
+                None if context_pack is None else self._decode_control_row(context_pack)
+            ),
+            "profile_revision": None if profile is None else self._decode_control_row(profile),
+            "unassigned_evidence": attempt is None,
         }
 
     def get_thread(self, thread_id: str) -> dict[str, Any] | None:
@@ -771,6 +1677,14 @@ class SQLiteTraceStore:
             if column in item:
                 raw = item.pop(column)
                 item[public] = None if raw is None else json.loads(raw)
+        return item
+
+    @staticmethod
+    def _decode_control_row(row: sqlite3.Row) -> dict[str, Any]:
+        item = dict(row)
+        for column in tuple(item):
+            if column.endswith("_json"):
+                item[column[:-5]] = json.loads(item.pop(column))
         return item
 
 

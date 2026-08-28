@@ -86,6 +86,13 @@ def test_mapping_uses_stable_uuid5_and_prerequisites() -> None:
     assert first[-1]["body"]["parent_span_id"] == first[-2]["body"]["id"]
 
 
+def test_mapping_inherits_explicit_attempt_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TELOS_ATTEMPT_ID", "attempt-7")
+    operations = map_codex_hook(_payload("UserPromptSubmit"), 100)
+    assert operations[0]["body"]["attempt_id"] == "attempt-7"
+    assert operations[1]["body"]["attempt_id"] == "attempt-7"
+
+
 def test_post_tool_error_and_permission_are_observation_only() -> None:
     failed = _payload("PostToolUse")
     failed["tool_response"] = {"success": False, "error": "boom"}

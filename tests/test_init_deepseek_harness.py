@@ -205,6 +205,7 @@ def test_adapter_maps_native_events_to_trace_span_tree(tmp_path: Path) -> None:
     env["TELOS_DSH_TELEMETRY_MODULE_URL"] = stub.resolve().as_uri()
     env["ASSET_URL"] = asset.resolve().as_uri()
     env["RECORDS"] = json.dumps(records)
+    env["TELOS_ATTEMPT_ID"] = "attempt-deepseek"
     completed = subprocess.run(
         ["node", "--input-type=module", "--eval", script],
         env=env,
@@ -215,6 +216,8 @@ def test_adapter_maps_native_events_to_trace_span_tree(tmp_path: Path) -> None:
     operations = json.loads(completed.stdout)
     spans = [op["body"] for op in operations if op["entity"] == "span"]
     traces = [op["body"] for op in operations if op["entity"] == "trace"]
+    threads = [op["body"] for op in operations if op["entity"] == "thread"]
+    assert all(item["attempt_id"] == "attempt-deepseek" for item in threads + traces)
 
     completed_llms = [span for span in spans if span["type"] == "llm" and span["status"] == "ok"]
     assert len({span["id"] for span in completed_llms}) == 2
@@ -237,6 +240,11 @@ def test_adapter_maps_native_events_to_trace_span_tree(tmp_path: Path) -> None:
             body["project_id"] = "default"
     completed_trace = next(trace for trace in reversed(traces) if trace["status"] == "ok")
     with SQLiteTraceStore(tmp_path / "telos.db") as store:
+        run = store.create_task_run(goal="adapter fixture")
+        store.create_attempt(
+            row_id="attempt-deepseek", task_run_id=run["id"],
+            harness="deepseek-harness", status="running",
+        )
         store.upsert_batch(operations)
         detail = store.get_trace(completed_trace["id"])
         assert detail is not None

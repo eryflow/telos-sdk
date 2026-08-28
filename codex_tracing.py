@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 import time
 import uuid
@@ -74,6 +75,8 @@ def _thread_body(
             "reason",
         ),
     }
+    if os.environ.get("TELOS_ATTEMPT_ID"):
+        body["attempt_id"] = os.environ["TELOS_ATTEMPT_ID"]
     if finished:
         body["end_time_us"] = now_us
     return body
@@ -105,6 +108,8 @@ def _trace_body(
             payload, "cwd", "model", "permission_mode", "agent_id", "agent_type"
         ),
     }
+    if os.environ.get("TELOS_ATTEMPT_ID"):
+        body["attempt_id"] = os.environ["TELOS_ATTEMPT_ID"]
     if prompt is not None:
         body["input"] = prompt
     if output is not None:

@@ -74,6 +74,10 @@ class TracingAPI:
                 raise ValueError("operations must contain 1..256 items")
             normalized = self._normalize_operations(operations, harness)
             accepted = self.store.upsert_batch(normalized)
+            for operation in normalized:
+                body = operation["body"]
+                if operation["entity"] == "thread" and body.get("attempt_id"):
+                    self.store.set_attempt_status(str(body["attempt_id"]), "running")
         except (KeyError, TypeError, ValueError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             return web.json_response({"error": str(exc) or "invalid tracing batch"}, status=400)
         except Exception:  # noqa: BLE001

@@ -185,7 +185,7 @@ def test_find_active_synthetic_feedback_and_pragmas(tmp_path) -> None:
 
     connection = sqlite3.connect(path)
     try:
-        assert connection.execute("SELECT version FROM schema_migrations").fetchone()[0] == 1
+        assert connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 2
     finally:
         connection.close()
 
@@ -221,6 +221,36 @@ def test_terminal_thread_abandons_running_children(tmp_path) -> None:
         assert detail["spans"][0]["status"] == "ok"
         assert detail["spans"][0]["end_time_us"] == 350
         assert detail["spans"][0]["output"] == {"late": True}
+
+
+def test_task_run_attempt_and_trace_have_explicit_lineage(tmp_path) -> None:
+    with SQLiteTraceStore(tmp_path / "trace.db") as store:
+        task_type = store.ensure_task_type("code-defect-repair")
+        run = store.create_task_run(
+            goal="fix the tab state", task_type_id=task_type["id"],
+            workspace={"root": "/repo"},
+        )
+        attempt = store.create_attempt(task_run_id=run["id"], harness="codex")
+        store.upsert_thread({
+            "id": "thread-1", "harness": "codex", "external_id": "session-1",
+            "start_time_us": 100, "attempt_id": attempt["id"],
+        })
+        store.upsert_trace(_trace(store))
+
+        detail = store.get_trace("trace-1")
+        assert detail["attempt"]["id"] == attempt["id"]
+        assert detail["task_run"]["id"] == run["id"]
+        assert detail["unassigned_evidence"] is False
+        assert store.get_task_run(run["id"])["attempts"][0]["harness"] == "codex"
+
+        store.upsert_thread({
+            "id": "unassigned-thread", "harness": "kimi-code",
+            "external_id": "unassigned", "start_time_us": 100,
+        })
+        body = _trace(store, row_id="unassigned", thread_id="unassigned-thread")
+        body["harness"] = "kimi-code"
+        store.upsert_trace(body)
+        assert store.get_trace("unassigned")["unassigned_evidence"] is True
 
 
 def test_trace_list_10k_p95_under_200ms(tmp_path) -> None:

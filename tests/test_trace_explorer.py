@@ -16,3 +16,5 @@ def test_trace_explorer_is_self_contained_and_uses_requested_api() -> None:
     assert 'id="load-more"' in html
     assert "Thread timeline" in html
     assert "cost_usd_micros" in html
+    assert "selectedInspectorTab=k" in html
+    assert "show(selectedInspectorTab" in html

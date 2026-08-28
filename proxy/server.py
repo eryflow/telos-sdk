@@ -60,6 +60,7 @@ from telos.proxy.pipeline import (
 from telos.scripts.telos_anthropic_transport import _detect_harness_signal
 from telos.tracing import SQLiteTraceStore
 from telos.proxy.tracing_api import TracingAPI
+from telos.proxy.control_api import ControlAPI
 
 if TYPE_CHECKING:
     from telos.config import UpstreamConfig
@@ -2631,7 +2632,10 @@ def make_app(
     app.router.add_post("/__telos/control/reset", proxy.handle_control_reset)
     if proxy._tracing_store is not None:
         tracing_api = TracingAPI(proxy._tracing_store, proxy._trace_harnesses)
+        control_api = ControlAPI(proxy._tracing_store)
         app.router.add_post("/__telos/tracing/v1/batch", tracing_api.batch)
+        app.router.add_get("/__telos", control_api.page)
+        app.router.add_get("/__telos/", control_api.page)
         app.router.add_get("/__telos/traces", tracing_api.page)
         app.router.add_get("/__telos/api/v1/projects", tracing_api.projects)
         app.router.add_get("/__telos/api/v1/traces", tracing_api.traces)
@@ -2643,6 +2647,27 @@ def make_app(
         )
         app.router.add_post(
             "/__telos/api/v1/feedback-scores", tracing_api.feedback,
+        )
+        app.router.add_get("/__telos/api/v1/task-runs", control_api.task_runs)
+        app.router.add_get("/__telos/api/v1/task-runs/{run_id}", control_api.task_run)
+        app.router.add_get("/__telos/api/v1/packs", control_api.packs)
+        app.router.add_post("/__telos/api/v1/packs", control_api.packs)
+        app.router.add_get("/__telos/api/v1/packs/{pack_id}", control_api.pack)
+        app.router.add_post(
+            "/__telos/api/v1/packs/{pack_id}/validate", control_api.pack_validate,
+        )
+        app.router.add_post("/__telos/api/v1/handoffs/plan", control_api.handoff_plan)
+        app.router.add_post("/__telos/api/v1/handoffs", control_api.handoff)
+        app.router.add_get(
+            "/__telos/api/v1/evolution/{task_type}", control_api.evolution,
+        )
+        app.router.add_post("/__telos/api/v1/candidates", control_api.candidate)
+        app.router.add_post("/__telos/api/v1/evaluations", control_api.evaluation)
+        app.router.add_post(
+            "/__telos/api/v1/profile-revisions/{revision_id}/promote", control_api.promote,
+        )
+        app.router.add_post(
+            "/__telos/api/v1/task-types/{task_type_id}/rollback", control_api.rollback,
         )
     app.router.add_get("/__telos/developer", proxy.handle_developer)
     app.router.add_get("/__telos/developer.json", proxy.handle_developer_json)

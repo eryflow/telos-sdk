@@ -6,10 +6,33 @@
 >
 > - Want to get started → [playbook.md](playbook.md), [User-guide.md](User-guide.md)
 > - Want the protocol spec → [2026-05-06-telos-protocol.md](2026-05-06-telos-protocol.md)
-> - Want the local Trace / self-evolution decision → [ADR-0001](adr/0001-local-trace-and-task-type-evolution.md)
+> - Want the Trace evidence design → [ADR-0002](adr/0002-opik-style-agent-tracing-platform.md)
+> - Want the Context Pack / handoff / evolution design → [ADR-0003](adr/0003-portable-context-pack-and-self-evolution.md)
 > - Want the change history → [../CHANGELOG.md](../CHANGELOG.md)
 >
-> Last updated: 2026-05-18
+> Last updated: 2026-08-28
+
+---
+
+## Context lifecycle control plane
+
+The request optimization pipeline documented below remains the runtime data path. Above it, TELOS now owns task identity and resumable state:
+
+```text
+TaskType → TaskRun → Attempt → Thread → Trace → Span
+               │         │                    │
+               │         └─ Profile Revision  └─ Outcome Resolution
+               └─ Context Pack → Handoff → RegressionCase → Evaluation → Promotion
+```
+
+- `context_pack.py` creates, validates, deterministically exports, and safely imports immutable semantic checkpoints.
+- `handoff.py` negotiates capabilities and writes temporary Codex/Kimi/DeepSeek Launch Plans under `~/.telos/runs/`.
+- `evolution.py` owns immutable Profile payloads, deterministic Candidate proposals, evaluation matrices, and quality gates.
+- `tracing/store.py` is the single SQLite writer for the upper identity model and Trace evidence links.
+- `proxy/control_api.py` and `scripts/build_context_control.py` provide the loopback Context/Runs/Evolution/Evidence control plane.
+- `task_run.py`, `context_pack.main`, `handoff.main`, and `evolve.py` expose the same lifecycle through the CLI.
+
+Context Pack, Profile Revision, and Trace Evidence are separate immutable facts. `TelosIR` remains a single-request transport representation and is not serialized as a task checkpoint.
 
 ---
 
