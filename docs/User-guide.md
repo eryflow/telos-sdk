@@ -397,7 +397,7 @@ The runner reads the public Case/Profile/Harness/Run payload and must echo `harn
 
 The export command writes `sft.jsonl`, `preference.jsonl`, and `rl.jsonl`, each retaining immutable evidence identifiers.
 
-For a paid, non-mocked Codex/Kimi experiment with public/private scoring separation, see [the Webhook retry self-evolution task](self-evolution-webhook-retry-task.md).
+For a concrete long-running example, see [the family weekly meal-planning self-evolution task](self-evolution-family-meal-planning-task.md).
 
 ---
 
