@@ -139,6 +139,7 @@ class TracingAPI:
                 harness=request.query.get("harness"),
                 status=request.query.get("status"),
                 model=request.query.get("model"),
+                attempt_id=request.query.get("attempt_id"),
                 start_time_from_us=_optional_int(request.query.get("start_time_from_us")),
                 start_time_to_us=_optional_int(request.query.get("start_time_to_us")),
                 search=request.query.get("q"),

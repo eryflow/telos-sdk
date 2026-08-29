@@ -358,17 +358,46 @@ On failure, the temporary workspace is retained for inspection. Use `--keep` to 
 
 An Outcome Resolution must be explicit; a Harness exiting normally is not treated as success. Freeze representative Pack/outcome pairs as RegressionCases, then evaluate one `change_dimension` Candidate against production over `case × {reference,candidate} × required Harness`.
 
-The built-in gates cover matrix validity, protected regressions, score improvement, portability, cost, p95 latency, and independently verified Trace/Attempt/Pack/Profile linkage. Candidate generation only reads public classifications and redacted evidence; evaluator commands receive private scoring policy separately. Passing only marks a Candidate `recommended`—promotion is always manual.
+The loop follows the [PenguinHarness](https://github.com/Prism-Shadow/penguin-harness) evidence/optimization split: the Optimizer receives only the public task, Profile, scores, and evidence identities; a separate evaluator receives the private rubric and gold. Every trial gets a fresh workspace and Attempt, and the frozen Case payload, Context Pack, and Profile digests are checked after execution. A Candidate is retained only when its mean score is strictly higher and every validity, protected-regression, portability, cost, p95-latency, Trace-integrity, and state-integrity gate passes.
+
+`run` can execute repeated trials and recursively use each accepted Candidate as the next round's Reference. It never moves the production pointer:
 
 ```bash
-telos evolve run --task code-defect-repair
+telos evolve run --task code-defect-repair \
+  --rounds 3 --runs 3 --target-score 0.9 \
+  --optimizer-command python3 optimizer.py
 telos evolve status --task code-defect-repair
 telos evolve promote <recommended-revision-id>
 telos evolve rollback --task code-defect-repair
 telos evolve export --task code-defect-repair --output ./training-data
 ```
 
+The optional Optimizer command reads one JSON object from stdin and prints:
+
+```json
+{
+  "change_dimension": "instructions",
+  "instructions": "complete candidate instructions",
+  "hypothesis": {
+    "prediction": "the frozen score will improve",
+    "observable": "mean score"
+  }
+}
+```
+
+Freeze a workspace fixture and private scoring inputs when the task needs executable replay. `--command` must be last because it captures the remaining runner arguments:
+
+```bash
+telos evolve freeze --task code-defect-repair --pack <pack-id> --outcome-id <outcome-id> \
+  --protected --fixture ./fixture --private-rubric ./rubric.md --private-gold ./gold.json \
+  --evaluator-command python3 evaluator.py --command python3 runner.py
+```
+
+The runner reads the public Case/Profile/Harness/Run payload and must echo `harness` and `profile_revision_id`. The private evaluator receives that execution plus `private`, then returns `outcome`, `score` (0–100), and optional cost, latency, and evidence. Passing marks the final Candidate `recommended`; `promote` remains an explicit human action.
+
 The export command writes `sft.jsonl`, `preference.jsonl`, and `rl.jsonl`, each retaining immutable evidence identifiers.
+
+For a paid, non-mocked Codex/Kimi experiment with public/private scoring separation, see [the Webhook retry self-evolution task](self-evolution-webhook-retry-task.md).
 
 ---
 

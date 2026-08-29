@@ -70,10 +70,10 @@ flowchart LR
 | Deterministic Context Pack, `.telosbundle`, secret/path/checksum validation | **Available** |
 | Codex ↔ Kimi handoff with explicit capability degradation and Attempt lineage | **Available** |
 | Context/Runs/Evolution/Evidence local control plane | **Available** |
-| Frozen outcomes, single-dimension Candidates, cross-Harness gates, promote/rollback | **Available** |
+| Frozen private/public cases, recursive evidence-driven Candidates, repeated cross-Harness gates, promote/rollback | **Available** |
 | SFT, preference, and RL JSONL export | **Available** |
 
-Evaluation is explicit and offline: TELOS never promotes a Candidate automatically. `telos evolve run` executes the frozen matrix; `promote` and `rollback` only move the audited production pointer.
+Evaluation is explicit and offline: `telos evolve run --rounds N --runs N` executes isolated frozen matrices and retains only strict improvements. TELOS never promotes a Candidate automatically; `promote` and `rollback` alone move the audited production pointer.
 
 <a id="quickstart"></a>
 

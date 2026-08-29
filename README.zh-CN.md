@@ -70,10 +70,10 @@ flowchart LR
 | 确定性 Context Pack、`.telosbundle`、secret/path/checksum 校验 | **已可用** |
 | Codex ↔ Kimi handoff、显式能力降级与 Attempt 谱系 | **已可用** |
 | Context/Runs/Evolution/Evidence 本地控制面 | **已可用** |
-| 冻结结果、单维 Candidate、跨 Harness 质量门、发布与回滚 | **已可用** |
+| 公私隔离的冻结样本、递归证据驱动 Candidate、多次跨 Harness 质量门、发布与回滚 | **已可用** |
 | SFT、Preference 与 RL JSONL 导出 | **已可用** |
 
-评测只在用户显式触发时离线执行；TELOS 永不自动发布 Candidate。`telos evolve run` 执行冻结矩阵，`promote` 与 `rollback` 只移动有审计记录的 production pointer。
+评测只在用户显式触发时离线执行；`telos evolve run --rounds N --runs N` 在隔离工作区执行冻结矩阵，只保留严格提升的 Candidate。TELOS 永不自动发布 Candidate，只有 `promote` 与 `rollback` 能移动有审计记录的 production pointer。
 
 <a id="quickstart"></a>
 

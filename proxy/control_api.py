@@ -15,7 +15,7 @@ from typing import Any
 from aiohttp import web
 
 from telos.context_pack import create_context_pack, validate_context_pack
-from telos.evolution import evaluate_candidate, propose_candidate
+from telos.evolution import evaluate_candidate, optimize_profile, propose_candidate
 from telos.handoff import CAPABILITIES, compatibility_report, prepare_handoff
 
 
@@ -224,6 +224,8 @@ class ControlAPI:
             body = await self._body(request)
             result = propose_candidate(
                 self.store, task_type=str(body.get("task_type") or ""), home=self.home,
+                reference_revision_id=body.get("reference_revision_id"),
+                optimizer_command=body.get("optimizer_command"),
             )
             return web.json_response(result, status=201)
         except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
@@ -234,11 +236,22 @@ class ControlAPI:
             return denied
         try:
             body = await self._body(request)
-            result = await asyncio.to_thread(
-                evaluate_candidate, self.store,
-                task_type=str(body.get("task_type") or ""),
-                candidate_revision_id=str(body.get("candidate_revision_id") or ""),
-            )
+            if body.get("candidate_revision_id"):
+                result = await asyncio.to_thread(
+                    evaluate_candidate, self.store,
+                    task_type=str(body.get("task_type") or ""),
+                    candidate_revision_id=str(body["candidate_revision_id"]),
+                    reference_revision_id=body.get("reference_revision_id"),
+                    runs=int(body.get("runs", 1)),
+                )
+            else:
+                result = await asyncio.to_thread(
+                    optimize_profile, self.store,
+                    task_type=str(body.get("task_type") or ""),
+                    rounds=int(body.get("rounds", 1)), runs=int(body.get("runs", 1)),
+                    target_score=body.get("target_score"), home=self.home,
+                    optimizer_command=body.get("optimizer_command"),
+                )
             return web.json_response(result, status=201)
         except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
             return web.json_response({"error": str(exc)}, status=400)

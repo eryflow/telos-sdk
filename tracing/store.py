@@ -284,6 +284,27 @@ CREATE INDEX idx_threads_attempt ON threads(attempt_id);
 CREATE INDEX idx_traces_attempt ON traces(attempt_id,start_time_us,id);
 """
 
+_MIGRATION_3 = """
+CREATE TABLE evaluation_trials (
+    id TEXT PRIMARY KEY,
+    evaluation_run_id TEXT NOT NULL REFERENCES evaluation_runs(id) ON DELETE CASCADE,
+    regression_case_id TEXT NOT NULL REFERENCES regression_cases(id),
+    harness TEXT NOT NULL,
+    variant TEXT NOT NULL CHECK (variant IN ('reference','candidate')),
+    run_index INTEGER NOT NULL CHECK (run_index >= 1),
+    attempt_id TEXT NOT NULL REFERENCES attempts(id),
+    outcome TEXT NOT NULL CHECK (outcome IN ('pass','fail','error')),
+    score REAL NOT NULL,
+    cost_usd_micros INTEGER NOT NULL DEFAULT 0,
+    latency_us INTEGER NOT NULL DEFAULT 0,
+    evidence_json TEXT NOT NULL DEFAULT '{}',
+    created_at_us INTEGER NOT NULL,
+    UNIQUE (evaluation_run_id,regression_case_id,harness,variant,run_index)
+);
+CREATE INDEX idx_evaluation_trials_run
+    ON evaluation_trials(evaluation_run_id,regression_case_id,harness,variant,run_index);
+"""
+
 
 def _required(body: Mapping[str, Any], key: str) -> Any:
     value = body.get(key)
@@ -377,6 +398,12 @@ class SQLiteTraceStore:
             self._connection.executescript(
                 f"BEGIN IMMEDIATE;\n{_MIGRATION_2}\n"
                 f"INSERT INTO schema_migrations(version, applied_at_us) VALUES (2, {applied});\nCOMMIT;"
+            )
+            current = 2
+        if current < 3:
+            self._connection.executescript(
+                f"BEGIN IMMEDIATE;\n{_MIGRATION_3}\n"
+                f"INSERT INTO schema_migrations(version, applied_at_us) VALUES (3, {applied});\nCOMMIT;"
             )
         with self._connection:
             self._connection.execute(
@@ -972,6 +999,53 @@ class SQLiteTraceStore:
         assert row is not None
         return self._decode_control_row(row)
 
+    def add_evaluation_trial(
+        self, *, evaluation_run_id: str, regression_case_id: str, harness: str,
+        variant: str, run_index: int, attempt_id: str, outcome: str, score: float,
+        cost_usd_micros: int = 0, latency_us: int = 0,
+        evidence: Mapping[str, Any] | None = None, row_id: str | None = None,
+    ) -> dict[str, Any]:
+        if variant not in {"reference", "candidate"} or outcome not in {"pass", "fail", "error"}:
+            raise ValueError("invalid evaluation variant or outcome")
+        run_index = _integer(run_index, "run_index", minimum=1)
+        if isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(score):
+            raise ValueError("score must be finite")
+        cost_usd_micros = _integer(cost_usd_micros, "cost_usd_micros", minimum=0)
+        latency_us = _integer(latency_us, "latency_us", minimum=0)
+        row_id, timestamp = row_id or str(uuid4()), now_us()
+        with self._transaction():
+            run = self._validate_reference("evaluation_runs", evaluation_run_id, "evaluation_run_id")
+            case = self._validate_reference("regression_cases", regression_case_id, "regression_case_id")
+            attempt = self._validate_reference("attempts", attempt_id, "attempt_id")
+            pack = self._validate_reference("context_packs", case["pack_id"], "pack_id")
+            expected_revision = (
+                run["reference_revision_id"] if variant == "reference"
+                else run["candidate_revision_id"]
+            )
+            if run["status"] != "running" or case["task_type_id"] != run["task_type_id"]:
+                raise ValueError("evaluation is not running or case belongs to another task type")
+            if (
+                attempt["task_run_id"] != pack["task_run_id"]
+                or attempt["harness"] != harness
+                or attempt["context_pack_id"] != case["pack_id"]
+                or attempt["profile_revision_id"] != expected_revision
+            ):
+                raise ValueError("evaluation Attempt does not match its Case/Harness/Profile")
+            self._connection.execute(
+                """INSERT INTO evaluation_trials
+                   (id,evaluation_run_id,regression_case_id,harness,variant,run_index,
+                    attempt_id,outcome,score,cost_usd_micros,latency_us,evidence_json,created_at_us)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (row_id, evaluation_run_id, regression_case_id, harness, variant, run_index,
+                 attempt_id, outcome, float(score), cost_usd_micros, latency_us,
+                 _json(evidence, {}), timestamp),
+            )
+            row = self._connection.execute(
+                "SELECT * FROM evaluation_trials WHERE id=?", (row_id,)
+            ).fetchone()
+        assert row is not None
+        return self._decode_control_row(row)
+
     def finish_evaluation(
         self, row_id: str, *, passed: bool, gates: Mapping[str, Any], error: bool = False,
     ) -> dict[str, Any]:
@@ -1091,10 +1165,16 @@ class SQLiteTraceStore:
                    ORDER BY created_at_us DESC,id DESC""", (task["id"],),
             ).fetchall()
             results = []
+            trials = []
             if evaluations:
                 results = self._connection.execute(
                     """SELECT * FROM evaluation_results WHERE evaluation_run_id=?
                        ORDER BY regression_case_id,harness,variant""",
+                    (evaluations[0]["id"],),
+                ).fetchall()
+                trials = self._connection.execute(
+                    """SELECT * FROM evaluation_trials WHERE evaluation_run_id=?
+                       ORDER BY regression_case_id,harness,variant,run_index""",
                     (evaluations[0]["id"],),
                 ).fetchall()
         return {
@@ -1103,6 +1183,7 @@ class SQLiteTraceStore:
             "regression_cases": [self._decode_control_row(row) for row in cases],
             "evaluations": [self._decode_control_row(row) for row in evaluations],
             "latest_results": [self._decode_control_row(row) for row in results],
+            "latest_trials": [self._decode_control_row(row) for row in trials],
         }
 
     def _upsert_project(self, body: Mapping[str, Any]) -> dict[str, Any]:
@@ -1480,7 +1561,7 @@ class SQLiteTraceStore:
 
     def list_traces(
         self, *, project_id: str | None = None, harness: str | None = None,
-        status: str | None = None, model: str | None = None,
+        status: str | None = None, model: str | None = None, attempt_id: str | None = None,
         start_time_from_us: int | None = None, start_time_to_us: int | None = None,
         search: str | None = None, cursor: str | None = None, limit: int = 50,
     ) -> dict[str, Any]:
@@ -1491,6 +1572,9 @@ class SQLiteTraceStore:
             if value is not None:
                 where.append(f"{column}=?")
                 values.append(value)
+        if attempt_id is not None:
+            where.append("t.attempt_id=?")
+            values.append(attempt_id)
         if status is not None and status not in STATUSES:
             raise ValueError(f"unsupported trace status: {status}")
         if start_time_from_us is not None:

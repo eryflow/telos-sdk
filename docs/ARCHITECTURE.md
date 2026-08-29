@@ -27,7 +27,7 @@ TaskType → TaskRun → Attempt → Thread → Trace → Span
 
 - `context_pack.py` creates, validates, deterministically exports, and safely imports immutable semantic checkpoints.
 - `handoff.py` negotiates capabilities and writes temporary Codex/Kimi/DeepSeek Launch Plans under `~/.telos/runs/`.
-- `evolution.py` owns immutable Profile payloads, deterministic Candidate proposals, evaluation matrices, and quality gates.
+- `evolution.py` owns immutable Profile/RegressionCase payloads, public-evidence Candidate proposals, isolated repeated evaluation trials, and quality gates.
 - `tracing/store.py` is the single SQLite writer for the upper identity model and Trace evidence links.
 - `proxy/control_api.py` and `scripts/build_context_control.py` provide the loopback Context/Runs/Evolution/Evidence control plane.
 - `task_run.py`, `context_pack.main`, `handoff.main`, and `evolve.py` expose the same lifecycle through the CLI.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from telos.context_pack import create_context_pack
@@ -8,14 +9,17 @@ from telos.evolution import (
     create_profile,
     evaluate_candidate,
     freeze_case,
+    optimize_profile,
+    optimizer_evidence_view,
     propose_candidate,
+    validate_frozen_case,
     validate_profile,
 )
 from telos.tracing import SQLiteTraceStore
 from telos.training_export import export_training_data
 
 
-def _fixture(store: SQLiteTraceStore, home: Path):
+def _fixture(store: SQLiteTraceStore, home: Path, *, case_policy=None):
     production = create_profile(
         store, task_type="code-defect-repair", state="production", home=home,
         instructions="Inspect the failing behavior and verify the fix.",
@@ -48,7 +52,7 @@ def _fixture(store: SQLiteTraceStore, home: Path):
     case = freeze_case(
         store, task_type="code-defect-repair", pack_id=manifest["pack_id"],
         outcome_resolution_id=outcome["id"], protected=True,
-        policy={"required_harnesses": ["codex", "kimi-code"]},
+        policy=case_policy or {"required_harnesses": ["codex", "kimi-code"]},
     )
     return production, run, case
 
@@ -201,3 +205,168 @@ def test_command_evaluator_receives_public_view_and_attempt_identity(tmp_path) -
     assert result["evidence"] == {
         "attempt": "attempt-1", "private_gold_visible": False,
     }
+
+
+def test_repeated_runs_use_frozen_isolated_workspaces_and_strict_improvement(tmp_path) -> None:
+    fixture = tmp_path / "fixture"
+    fixture.mkdir()
+    (fixture / "input.txt").write_text("frozen\n")
+    seen: list[tuple[str, int, str]] = []
+    with SQLiteTraceStore(tmp_path / "trace.db") as store:
+        _, _, case = _fixture(
+            store, tmp_path / "telos",
+            case_policy={
+                "required_harnesses": ["codex", "kimi-code"],
+                "workspace_fixture": str(fixture),
+            },
+        )
+        validate_frozen_case(case)
+        (fixture / "input.txt").write_text("mutated after freeze\n")
+        candidate = propose_candidate(store, task_type="code-defect-repair", home=tmp_path / "telos")
+        traced = _runner(store)
+
+        def repeated(case, revision, harness, variant):
+            workspace = Path(case["_workspace"])
+            seen.append((str(workspace), case["_run_index"], (workspace / "input.txt").read_text()))
+            return traced(case, revision, harness, variant)
+
+        evaluation = evaluate_candidate(
+            store, task_type="code-defect-repair", candidate_revision_id=candidate["id"],
+            runs=2, runner=repeated,
+        )
+        state = store.get_evolution("code-defect-repair")
+
+        assert evaluation["status"] == "passed"
+        assert evaluation["gates"]["validity"] == {
+            "passed": True, "results": 4, "trials": 8, "runs_per_case": 2,
+        }
+        assert len(state["latest_trials"]) == 8
+        assert len({workspace for workspace, _, _ in seen}) == 8
+        assert {run for _, run, _ in seen} == {1, 2}
+        assert {content for _, _, content in seen} == {"frozen\n"}
+        attempt_id = state["latest_trials"][0]["attempt_id"]
+        assert {trace["attempt_id"] for trace in store.list_traces(attempt_id=attempt_id)["items"]} == {attempt_id}
+
+    with SQLiteTraceStore(tmp_path / "equal.db") as store:
+        _fixture(store, tmp_path / "equal-telos")
+        candidate = propose_candidate(store, task_type="code-defect-repair", home=tmp_path / "equal-telos")
+        traced = _runner(store)
+
+        def equal_score(case, revision, harness, variant):
+            result = traced(case, revision, harness, variant)
+            result["score"] = 0.5
+            return result
+
+        evaluation = evaluate_candidate(
+            store, task_type="code-defect-repair", candidate_revision_id=candidate["id"],
+            runner=equal_score,
+        )
+        assert evaluation["status"] == "failed"
+        assert evaluation["gates"]["outcome_quality"]["passed"] is False
+        assert evaluation["gates"]["outcome_quality"]["improvement"] == 0
+
+
+def test_private_evaluator_is_separate_from_public_runner(tmp_path) -> None:
+    runner = tmp_path / "runner.py"
+    runner.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        "p=json.load(sys.stdin)\n"
+        "print(json.dumps({'harness':p['harness'],'profile_revision_id':p['profile_revision_id'],"
+        "'evidence':{'private_visible':any(k.startswith('private_') for k in p['policy'])}}))\n"
+    )
+    runner.chmod(0o755)
+    evaluator = tmp_path / "evaluator.py"
+    evaluator.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        "p=json.load(sys.stdin)\n"
+        "ok=p['private']['private_gold']=='gold' and p['private']['private_rubric']=='rubric'\n"
+        "print(json.dumps({'outcome':'pass' if ok else 'error','score':1.0 if ok else 0.0,"
+        "'evidence':{'private_evaluator_used':ok}}))\n"
+    )
+    evaluator.chmod(0o755)
+    with SQLiteTraceStore(tmp_path / "trace.db") as store:
+        production, _, case = _fixture(
+            store, tmp_path / "telos",
+            case_policy={
+                "required_harnesses": ["codex", "kimi-code"],
+                "runner_command": [str(runner)], "evaluator_command": [str(evaluator)],
+                "private_gold": "gold", "private_rubric": "rubric",
+            },
+        )
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        result = command_case_runner(
+            {**case, "_attempt_id": "attempt-1", "_run_index": 1,
+             "_workspace": str(workspace)},
+            production, "codex", "reference",
+        )
+
+    assert result["outcome"] == "pass"
+    assert result["score"] == 1.0
+    assert result["evidence"] == {
+        "private_visible": False, "private_evaluator_used": True,
+    }
+
+
+def test_external_optimizer_runs_recursive_evidence_loop_without_auto_promote(tmp_path) -> None:
+    optimizer = tmp_path / "optimizer.py"
+    captured = tmp_path / "optimizer-input.json"
+    optimizer.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, pathlib, sys\n"
+        "p=json.load(sys.stdin)\n"
+        f"pathlib.Path({str(captured)!r}).write_text(json.dumps(p))\n"
+        "n=len(p['prior_evaluations'])+1\n"
+        "instructions=p['reference']['instructions'].rstrip()+f'\\n\\n- Evolution rule {n}'\n"
+        "print(json.dumps({'change_dimension':'instructions','instructions':instructions,"
+        "'hypothesis':{'prediction':f'rule {n} raises the frozen score','observable':'score'}}))\n"
+    )
+    optimizer.chmod(0o755)
+    with SQLiteTraceStore(tmp_path / "trace.db") as store:
+        production, _, _ = _fixture(
+            store, tmp_path / "telos",
+            case_policy={
+                "required_harnesses": ["codex", "kimi-code"],
+                "private_gold": "never expose", "private_rubric": "also private",
+            },
+        )
+        traced = _runner(store)
+
+        def score_rules(case, revision, harness, variant):
+            result = traced(case, revision, harness, variant)
+            result["score"] = float(
+                (Path(revision["path"]) / "instructions.md").read_text().count("Evolution rule")
+            )
+            return result
+
+        optimized = optimize_profile(
+            store, task_type="code-defect-repair", rounds=2, runs=2,
+            target_score=2.0, home=tmp_path / "telos",
+            optimizer_command=[str(optimizer)], runner=score_rules,
+        )
+        state = store.get_evolution("code-defect-repair")
+
+        assert optimized["stop_reason"] == "target_score"
+        assert len(optimized["rounds"]) == 2
+        assert all(item["evaluation"]["status"] == "passed" for item in optimized["rounds"])
+        assert optimized["promotion_required"] is True
+        assert state["task_type"]["production_profile_revision_id"] == production["id"]
+        assert optimized["reference_revision_id"] != production["id"]
+        assert store.get_profile_revision(optimized["reference_revision_id"])["state"] == "recommended"
+        assert len(state["latest_trials"]) == 8
+
+    evidence = json.loads(captured.read_text())
+    assert evidence["protocol_version"] == 1
+    assert all(
+        "private" not in key and not key.endswith("_path")
+        for key in evidence["cases"][0]["policy"]
+    )
+    state["evaluations"][0]["gates"]["internal_error"] = {
+        "passed": False, "detail": "private rubric leaked here",
+    }
+    store_reference = state["revisions"][0]
+    public_view = optimizer_evidence_view(state, store_reference)
+    assert public_view["reference"]["id"] == store_reference["id"]
+    assert "private rubric" not in json.dumps(public_view)

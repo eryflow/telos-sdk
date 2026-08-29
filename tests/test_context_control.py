@@ -15,6 +15,7 @@ def test_context_control_is_goal_first_and_uses_public_routes() -> None:
     assert "id=\"liveState\"" in html
     assert "fetch('/api/v1'+path" in html
     assert 'href="/traces"' in html
+    assert '/traces?attempt_id=${encodeURIComponent(t.attempt_id)}' in html
     assert 'class="kpis"' in html
     assert 'class="app"' in html
     assert "write-token" in html

@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 
 from telos.config import disable_evolution_task, enable_evolution_task, load_config, telos_home
-from telos.evolution import create_profile, evaluate_candidate, freeze_case, propose_candidate
+from telos.evolution import create_profile, evaluate_candidate, freeze_case, optimize_profile
 from telos.tracing import SQLiteTraceStore
 
 
@@ -99,22 +99,41 @@ def main(argv: list[str] | None = None) -> int:
         parser = argparse.ArgumentParser(prog="telos evolve run")
         parser.add_argument("--task", required=True)
         parser.add_argument("--candidate")
+        parser.add_argument("--runs", type=int, default=1)
+        parser.add_argument("--rounds", type=int, default=1)
+        parser.add_argument("--target-score", type=float)
+        parser.add_argument("--optimizer-command", nargs="+")
         args = parser.parse_args(argv[1:])
         with _store() as store:
-            candidate = (
-                store.get_profile_revision(args.candidate) if args.candidate
-                else propose_candidate(store, task_type=args.task, home=telos_home())
-            )
-            if candidate is None:
-                parser.error(f"candidate does not exist: {args.candidate}")
-            result = evaluate_candidate(
-                store, task_type=args.task, candidate_revision_id=candidate["id"],
-            )
-        print(f"candidate: {candidate['id']}")
-        print(f"evaluation: {result['id']} ({result['status']})")
-        for name, gate in result["gates"].items():
-            print(f"  {name:<20} {'pass' if gate.get('passed') else 'fail'}")
-        return 0 if result["status"] == "passed" else 1
+            if args.candidate:
+                candidate = store.get_profile_revision(args.candidate)
+                if candidate is None:
+                    parser.error(f"candidate does not exist: {args.candidate}")
+                result = evaluate_candidate(
+                    store, task_type=args.task, candidate_revision_id=candidate["id"],
+                    reference_revision_id=candidate["parent_revision_id"], runs=args.runs,
+                )
+                history = [{"candidate_revision_id": candidate["id"], "evaluation": result}]
+                final_revision = candidate["id"] if result["status"] == "passed" else candidate["parent_revision_id"]
+                stop_reason = "candidate_evaluated"
+            else:
+                optimized = optimize_profile(
+                    store, task_type=args.task, rounds=args.rounds, runs=args.runs,
+                    target_score=args.target_score, home=telos_home(),
+                    optimizer_command=args.optimizer_command,
+                )
+                history = optimized["rounds"]
+                final_revision = optimized["reference_revision_id"]
+                stop_reason = optimized["stop_reason"]
+        for item in history:
+            result = item["evaluation"]
+            print(f"candidate: {item['candidate_revision_id']}")
+            print(f"evaluation: {result['id']} ({result['status']})")
+            for name, gate in result["gates"].items():
+                print(f"  {name:<20} {'pass' if gate.get('passed') else 'fail'}")
+        print(f"retained reference: {final_revision}")
+        print(f"stop reason: {stop_reason}")
+        return 0 if history and history[-1]["evaluation"]["status"] == "passed" else 1
 
     if command == "promote":
         parser = argparse.ArgumentParser(prog="telos evolve promote")
@@ -172,6 +191,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--protected", action="store_true")
     parser.add_argument("--harness", action="append", dest="harnesses", default=[])
     parser.add_argument("--timeout", type=int, default=300)
+    parser.add_argument("--fixture")
+    parser.add_argument("--private-rubric")
+    parser.add_argument("--private-gold")
+    parser.add_argument("--evaluator-command", nargs="+")
     parser.add_argument("--command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv[1:])
     policy = {
@@ -179,7 +202,15 @@ def main(argv: list[str] | None = None) -> int:
         "timeout_seconds": args.timeout,
     }
     if args.command:
-        policy["command"] = args.command
+        policy["runner_command" if args.evaluator_command else "command"] = args.command
+    if args.fixture:
+        policy["workspace_fixture"] = args.fixture
+    if args.private_rubric:
+        policy["private_rubric"] = Path(args.private_rubric).read_text()
+    if args.private_gold:
+        policy["private_gold"] = Path(args.private_gold).read_text()
+    if args.evaluator_command:
+        policy["evaluator_command"] = args.evaluator_command
     with _store() as store:
         case = freeze_case(
             store, task_type=args.task, pack_id=args.pack,
