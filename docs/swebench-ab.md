@@ -276,7 +276,7 @@ OpenRouter 上 `deepseek-v4-flash` 的 upstream 报价在 raw input、cache_read
 ```bash
 pip install -U telos-sdk
 telos init       # 自动接入 claude-code / codex / openclaw / hermes
-telos dashboard  # 浏览器打开离线美元看板
+telos dashboard --savings  # 浏览器打开美元看板
 ```
 
 详细的协议规范、harness 支持矩阵、模型适配器与三色带语义见项目主 README（[English](../README.md) · [中文](../README.zh-CN.md)）。

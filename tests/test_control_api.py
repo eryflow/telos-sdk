@@ -22,14 +22,14 @@ async def test_control_api_creates_pack_and_reports_handoff_without_guessing(tmp
     base = f"http://127.0.0.1:{port}"
     try:
         async with ClientSession() as session:
-            response = await session.get(base + "/__telos")
+            response = await session.get(base + "/")
             assert response.status == 200
             assert "Context Control Plane" in await response.text()
 
-            response = await session.post(base + "/__telos/api/v1/packs", json={})
+            response = await session.post(base + "/api/v1/packs", json={})
             assert response.status == 401
             response = await session.post(
-                base + "/__telos/api/v1/packs",
+                base + "/api/v1/packs",
                 headers={"Authorization": f"Bearer {token}"},
                 json={
                     "attempt_id": attempt["id"],
@@ -41,20 +41,20 @@ async def test_control_api_creates_pack_and_reports_handoff_without_guessing(tmp
             pack = await response.json()
             assert pack["source_attempt_id"] == attempt["id"]
 
-            response = await session.get(base + f"/__telos/api/v1/packs/{pack['id']}")
+            response = await session.get(base + f"/api/v1/packs/{pack['id']}")
             detail = await response.json()
             assert response.status == 200
             assert detail["portability"]["kimi-code"]["overall"] == "native"
 
             response = await session.post(
-                base + "/__telos/api/v1/handoffs/plan",
+                base + "/api/v1/handoffs/plan",
                 json={"pack_id": pack["id"], "destination": "kimi-code"},
             )
             report = await response.json()
             assert response.status == 200
             assert report["overall"] == "native"
 
-            response = await session.get(base + f"/__telos/api/v1/task-runs/{run['id']}")
+            response = await session.get(base + f"/api/v1/task-runs/{run['id']}")
             lineage = await response.json()
             assert lineage["task_run"]["goal"] == "fix persistent tabs"
             assert lineage["packs"][0]["id"] == pack["id"]

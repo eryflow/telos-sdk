@@ -149,6 +149,15 @@ def test_dashboard_rejects_bad_verb() -> None:
     print("✓ test_dashboard_rejects_bad_verb")
 
 
+def test_dashboard_opens_context_by_default_and_keeps_savings_view() -> None:
+    state = type("State", (), {"host": "127.0.0.1", "port": 7171})()
+    with patch("telos.gateway.daemon.read_state", return_value=state):
+        rc, out = _run(["dashboard", "--no-open"])
+        assert rc == 0 and out.strip().endswith("http://127.0.0.1:7171/")
+        rc, out = _run(["dashboard", "--no-open", "--savings"])
+        assert rc == 0 and out.strip().endswith("/savings")
+
+
 def test_status_without_gateway() -> None:
     _iso_home()
     rc, out = _run(["status"])

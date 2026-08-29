@@ -531,13 +531,16 @@ installer 默认停止并报告冲突；只有显式 `--replace-telemetry-backen
 复用 Gateway 的 aiohttp，入口为：
 
 ```text
-GET  /__telos/traces
-GET  /__telos/api/v1/projects
-GET  /__telos/api/v1/traces
-GET  /__telos/api/v1/traces/{id}
-GET  /__telos/api/v1/threads/{id}
-POST /__telos/api/v1/feedback-scores
+GET  /traces
+GET  /api/v1/projects
+GET  /api/v1/traces
+GET  /api/v1/traces/{id}
+GET  /api/v1/threads/{id}
+POST /api/v1/feedback-scores
 ```
+
+浏览器可见路由不暴露内部 `__telos` 前缀；旧地址仅作为兼容别名。Harness batch ingest
+仍使用内部 `/__telos/tracing/v1/batch`，避免破坏已安装适配器。
 
 `GET traces` 使用 `(start_time_us, id)` opaque cursor，不使用越翻越慢的 offset。支持 project、
 harness、status、model、时间范围和文本筛选。Trace detail 一次返回 Trace、Span 和 feedback；

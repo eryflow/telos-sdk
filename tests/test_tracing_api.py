@@ -108,33 +108,35 @@ async def test_tracing_batch_read_api_and_page(tmp_path) -> None:
             assert retry.status == 200
             assert all(not item["created"] for item in (await retry.json())["accepted"])
 
-            listed = await client.get(f"{base}/__telos/api/v1/traces?limit=10")
+            listed = await client.get(f"{base}/api/v1/traces?limit=10")
             item = (await listed.json())["items"][0]
             assert item["id"] == "trace-1"
             assert item["total_tokens"] == 15
             assert item["cost_usd_micros"] == 42
             assert "input" not in item
 
-            detail = await client.get(f"{base}/__telos/api/v1/traces/trace-1")
+            detail = await client.get(f"{base}/api/v1/traces/trace-1")
             payload = await detail.json()
             assert payload["trace"]["input"] == "please fix it"
             assert payload["spans"][0]["type"] == "llm"
 
-            thread = await client.get(f"{base}/__telos/api/v1/threads/thread-1")
+            thread = await client.get(f"{base}/api/v1/threads/thread-1")
             assert (await thread.json())["traces"][0]["id"] == "trace-1"
 
             feedback = await client.post(
-                f"{base}/__telos/api/v1/feedback-scores",
+                f"{base}/api/v1/feedback-scores",
                 json={"trace_id": "trace-1", "name": "quality", "value": 1},
             )
             assert feedback.status == 201
 
-            page = await client.get(f"{base}/__telos/traces")
+            page = await client.get(f"{base}/traces")
             assert page.status == 200
             html = await page.text()
             assert "TELOS Traces" in html
             assert "<option>abandoned</option>" in html
             assert "<option>unknown</option>" in html
+            assert 'href="/">' in html
+            assert "--bg:#f6f7fb" in html
 
             removed = await client.post(
                 f"{base}/__telos/reporter/events", json={"token": "must-not-forward"}

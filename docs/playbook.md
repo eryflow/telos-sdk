@@ -410,8 +410,8 @@ jq -c '{call: .call_index, cache_read: .normalized.cache_read, cum: .cumulative.
 
 | Dashboard | Entry point | What it shows | Use |
 |---|---|---|---|
-| 💰 **Savings dashboard** | `/__telos/dashboard` or `telos dashboard` | live tokens / dollars saved, timeline, breakdown by harness / model / session | show to the boss |
-| 🔬 **Developer page** | `/__telos/developer` | the IR structure of each in-memory session right now, PIN/FOLD/DROP distribution, tool stats | self-check cache-hit behavior |
+| 💰 **Savings dashboard** | `/savings` or `telos dashboard --savings` | live tokens / dollars saved, timeline, breakdown by harness / model / session | show to the boss |
+| 🔬 **Developer page** | `/developer` | the IR structure of each in-memory session right now, PIN/FOLD/DROP distribution, tool stats | self-check cache-hit behavior |
 | 📜 **usage_log** | `~/.telos/usage.jsonl` | per-call raw data | `jq` / plot it yourself |
 
 > For field mappings see [dashboard-savings-metrics.md](dashboard-savings-metrics.md) and [dashboard-developer-metrics.md](dashboard-developer-metrics.md).
@@ -443,7 +443,7 @@ flowchart TB
 ```bash
 telos replay --list                              # see replayable sessions in tracing SQLite
 telos replay --session <id>                       # by default runs all 4 modes
-telos dashboard --usage-log ~/.telos/usage.jsonl  # view the resulting savings totals
+python -m telos.scripts.build_savings_dashboard --usage-log ~/.telos/usage.jsonl
 ```
 
 The input each mode sees is exactly identical, and **the only variable is the switch itself**. Low cost: 1 real session + a stream of cheap `max_tokens=1` prefill calls per mode.
@@ -471,7 +471,7 @@ Detailed principles and boundaries: [replay-comparison.md](replay-comparison.md)
 
 1. **Use the same `session_id` for the same conversation**. Multi-turn cache accumulation depends entirely on it.
 2. **`telos` first, then `both`**. First verify TELOS prefix caching is stable with no anomalies, then layer on RTK, which rewrites tool results.
-3. **The first thing after integration is to look at the dashboard**. `/__telos/dashboard` or `telos dashboard`; confirm `cache_read` is rising and `cache hit%` is reasonable.
+3. **The first thing after integration is to look at the dashboard**. `/savings` or `telos dashboard --savings`; confirm `cache_read` is rising and `cache hit%` is reasonable.
 4. **Use replay to decide whether to fully enable a mode**. Don't go by feel —— run a replay once and look at the measured numbers in the A/B panel.
 5. **Treat `~/.telos/telos.db` as sensitive data**. Replay reads raw requests from LLM spans there. Enable `--record-corpus` only for legacy tooling that still needs JSONL.
 6. **Use non-strict in production** (default). On a TELOS failure it automatically degrades to passthrough, so correctness is never affected; `--strict` is only for dev debugging.
@@ -635,7 +635,7 @@ flowchart LR
   S1["1. Read §1-§5 of this doc<br/>build the mental model"] --> S2["2. pip install -e ."]
   S2 --> S3["3. telos proxy<br/>+ telos init --agent claude-code"]
   S3 --> S4["4. Use it normally for a few days<br/>let tracing spans accumulate naturally"]
-  S4 --> S5["5. telos dashboard<br/>confirm the cache is hitting"]
+  S4 --> S5["5. telos dashboard --savings<br/>confirm the cache is hitting"]
   S5 --> S6["6. telos replay --session &lt;id&gt;<br/>run the 4-mode comparison"]
   S6 --> S7{"Fully switch to both?"}
   S7 -- "look at the measured numbers" --> S8["decision"]

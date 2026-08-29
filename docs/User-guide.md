@@ -46,7 +46,8 @@ Afterward:
 
 ```bash
 telos              # pick a harness and enter its CLI (telos alias <harness> sets the default)
-telos dashboard    # open the live dashboard in the browser
+telos dashboard    # open the Context Control Plane
+telos dashboard --savings   # open token/cost savings
 telos mode both    # switch the optimization gear, hot-reloading the running gateway
 telos gateway status   # check the gateway's run status
 ```
@@ -250,7 +251,8 @@ telos gateway [start|stop|status|restart] [options]
   --foreground         run in the foreground, blocking (no backgrounding)
 
 telos mode [none|telos|rtk|both]   switch the optimization gear; hot-reloads the running gateway and persists it
-telos dashboard [--static] [--no-open]   open the dashboard in the browser
+telos dashboard [--no-open] [--savings]  open Context Control or token savings
+telos dashboard --static                 build a static token-savings report
 
 telos run start --task TYPE --goal GOAL --harness HARNESS
 telos run list|show|finish   own one TaskRun across Harness Attempts
@@ -334,7 +336,23 @@ telos pack export <pack-id> -o task.telosbundle
 telos pack import task.telosbundle
 ```
 
-The Context Control Plane is served at `http://127.0.0.1:7171/__telos/`. It answers which task is current, whether the Pack is complete, what each destination loses, which Attempt is running, and which Profile gates are challenged. The Evidence page remains at `/__telos/traces`.
+The Context Control Plane is served at `http://127.0.0.1:7171/`. It answers which task is current, whether the Pack is complete, what each destination loses, which Attempt is running, and which Profile gates are challenged. The Evidence page is at `/traces`. Legacy `/__telos/*` browser routes remain as compatibility aliases; ingest and control endpoints keep their internal prefix.
+
+### Kimi Code end-to-end acceptance
+
+The executable example below uses an isolated TELOS home and gateway, creates a source TaskRun and Context Pack, hands it to a real Kimi Code process, requires a Shell tool call that changes the shared workspace, and then verifies the TaskRun/Attempt/Pack/Trace linkage:
+
+```bash
+python3 examples/test_kimi_e2e.py
+```
+
+It makes one real model request and requires an authenticated Kimi Code CLI. A managed OAuth provider exposes lifecycle and tool evidence through hooks but does not expose the underlying model request to the gateway. To make the test also require an authoritative LLM Span, select a Kimi API-key provider routed through TELOS and run:
+
+```bash
+python3 examples/test_kimi_e2e.py --strict-llm
+```
+
+On failure, the temporary workspace is retained for inspection. Use `--keep` to retain a successful run as well.
 
 ## Offline self-evolution
 

@@ -55,7 +55,7 @@ flowchart LR
     O -. "人工发布 / 回滚" .-> H
 ```
 
-`TaskType → TaskRun → Attempt` 在 Harness Session 之上持有任务身份。不可变 Context Pack 保存目标、策略、进度、记忆、规范化对话、工作区和来源；Trace 树只作为证据层。Context Control Plane 位于 `http://127.0.0.1:7171/__telos/`，原始证据位于 `.../__telos/traces`。
+`TaskType → TaskRun → Attempt` 在 Harness Session 之上持有任务身份。不可变 Context Pack 保存目标、策略、进度、记忆、规范化对话、工作区和来源；Trace 树只作为证据层。Context Control Plane 位于 `http://127.0.0.1:7171/`，原始证据位于 `.../traces`。
 
 <a id="what-ships-today"></a>
 
@@ -101,10 +101,11 @@ telos status
 
 执行 `telos init` 后请启动一个新的 Harness 进程；已经运行的进程不会追溯加载新的模型供应商配置。
 
-查看流量和成本节省：
+打开 Context Control Plane；Token Savings 保留为独立视图：
 
 ```bash
 telos dashboard
+telos dashboard --savings
 ```
 
 ## 默认私有、随时迁移
@@ -145,7 +146,7 @@ Project  →  Thread  →  Trace  →  Span
 telos init --harness codex
 telos init --harness kimi-code
 telos init --harness deepseek-harness --replace-telemetry-backend
-# http://127.0.0.1:7171/__telos/traces
+# http://127.0.0.1:7171/traces
 ```
 
 如果 `PATH` 中优先出现的是另一个同名 `dsh`，请显式指定真正的 DeepSeek Harness CLI。
@@ -191,7 +192,7 @@ Prompt Cache 优化仍然是 TELOS 的底层能力，无需重写或压缩 Promp
 | Passthrough | 24,151 | 0 | **$0.3623** |
 | TELOS | 0 | 18,701 | **$0.0281（−92.3%）** |
 
-SWE-bench Verified 测得 new input `−52.8%`、端到端成本 `−40.5%`。A/B 解决率对比未发现统计显著回归（McNemar `p = 0.66`）。实际节省取决于工作负载和模型供应商的缓存计价；可用 `telos dashboard` 查看自身流量的绝对成本。
+SWE-bench Verified 测得 new input `−52.8%`、端到端成本 `−40.5%`。A/B 解决率对比未发现统计显著回归（McNemar `p = 0.66`）。实际节省取决于工作负载和模型供应商的缓存计价；可用 `telos dashboard --savings` 查看自身流量的绝对成本。
 
 详见[协议](https://docs.telosai.pro/zh/concepts/protocol)、[Benchmark 方法](https://docs.telosai.pro/zh/benchmark/swebench)和[支持矩阵](https://docs.telosai.pro/zh/reference/support-matrix)。
 

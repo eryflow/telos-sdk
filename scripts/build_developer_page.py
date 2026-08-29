@@ -504,7 +504,7 @@ def render_developer(
         title = 'overview'
         back = (
             '<div class="refresh-bar">JSON view available at '
-            '<a href="developer.json">/__telos/developer.json</a></div>'
+            '<a href="/developer.json">/developer.json</a></div>'
         )
 
     return f"""<!doctype html>
@@ -516,8 +516,10 @@ def render_developer(
 </head><body>
 <div class="wrap">
 <nav class="tabs" aria-label="Dashboard views">
-  <a href="/dashboard">Savings</a>
-  <a class="active" href="/__telos/developer">Trace</a>
+  <a href="/">Context</a>
+  <a href="/savings">Savings</a>
+  <a class="active" href="/developer">Developer</a>
+  <a href="/traces">Evidence</a>
 </nav>
 <header>
   <h1>TELOS · Trace inspector</h1>

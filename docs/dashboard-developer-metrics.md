@@ -1,6 +1,6 @@
 # Developer Dashboard Metrics Reference
 
-Entry point: `GET /__telos/developer` (HTML) or `/__telos/developer.json` (JSON).
+Entry point: `GET /developer` (HTML) or `/developer.json` (JSON).
 Source: rendered by [scripts/build_developer_page.py](../scripts/build_developer_page.py),
 with [proxy/inspector.py](../proxy/inspector.py) accumulating the in-memory state.
 

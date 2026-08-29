@@ -2627,6 +2627,7 @@ def make_app(
     # Must be registered before the catch-all passthrough, otherwise it gets swallowed.
     app.router.add_get("/dashboard", proxy.handle_dashboard)
     app.router.add_get("/__telos/dashboard", proxy.handle_dashboard)
+    app.router.add_get("/savings", proxy.handle_dashboard)
     app.router.add_route("GET", "/__telos/control/mode", proxy.handle_control_mode)
     app.router.add_route("POST", "/__telos/control/mode", proxy.handle_control_mode)
     app.router.add_post("/__telos/control/reset", proxy.handle_control_reset)
@@ -2634,9 +2635,18 @@ def make_app(
         tracing_api = TracingAPI(proxy._tracing_store, proxy._trace_harnesses)
         control_api = ControlAPI(proxy._tracing_store)
         app.router.add_post("/__telos/tracing/v1/batch", tracing_api.batch)
+        app.router.add_get("/", control_api.page)
+        app.router.add_get("/runs", control_api.page)
+        app.router.add_get("/evolution", control_api.page)
+        app.router.add_get("/traces", tracing_api.page)
         app.router.add_get("/__telos", control_api.page)
         app.router.add_get("/__telos/", control_api.page)
         app.router.add_get("/__telos/traces", tracing_api.page)
+        app.router.add_get("/api/v1/projects", tracing_api.projects)
+        app.router.add_get("/api/v1/traces", tracing_api.traces)
+        app.router.add_get("/api/v1/traces/{trace_id}", tracing_api.trace_detail)
+        app.router.add_get("/api/v1/threads/{thread_id}", tracing_api.thread_detail)
+        app.router.add_post("/api/v1/feedback-scores", tracing_api.feedback)
         app.router.add_get("/__telos/api/v1/projects", tracing_api.projects)
         app.router.add_get("/__telos/api/v1/traces", tracing_api.traces)
         app.router.add_get(
@@ -2649,6 +2659,19 @@ def make_app(
             "/__telos/api/v1/feedback-scores", tracing_api.feedback,
         )
         app.router.add_get("/__telos/api/v1/task-runs", control_api.task_runs)
+        app.router.add_get("/api/v1/task-runs", control_api.task_runs)
+        app.router.add_get("/api/v1/task-runs/{run_id}", control_api.task_run)
+        app.router.add_get("/api/v1/packs", control_api.packs)
+        app.router.add_post("/api/v1/packs", control_api.packs)
+        app.router.add_get("/api/v1/packs/{pack_id}", control_api.pack)
+        app.router.add_post("/api/v1/packs/{pack_id}/validate", control_api.pack_validate)
+        app.router.add_post("/api/v1/handoffs/plan", control_api.handoff_plan)
+        app.router.add_post("/api/v1/handoffs", control_api.handoff)
+        app.router.add_get("/api/v1/evolution/{task_type}", control_api.evolution)
+        app.router.add_post("/api/v1/candidates", control_api.candidate)
+        app.router.add_post("/api/v1/evaluations", control_api.evaluation)
+        app.router.add_post("/api/v1/profile-revisions/{revision_id}/promote", control_api.promote)
+        app.router.add_post("/api/v1/task-types/{task_type_id}/rollback", control_api.rollback)
         app.router.add_get("/__telos/api/v1/task-runs/{run_id}", control_api.task_run)
         app.router.add_get("/__telos/api/v1/packs", control_api.packs)
         app.router.add_post("/__telos/api/v1/packs", control_api.packs)
@@ -2669,6 +2692,8 @@ def make_app(
         app.router.add_post(
             "/__telos/api/v1/task-types/{task_type_id}/rollback", control_api.rollback,
         )
+    app.router.add_get("/developer", proxy.handle_developer)
+    app.router.add_get("/developer.json", proxy.handle_developer_json)
     app.router.add_get("/__telos/developer", proxy.handle_developer)
     app.router.add_get("/__telos/developer.json", proxy.handle_developer_json)
     app.router.add_route("*", "/__telos/{tail:.*}", _internal_not_found)
@@ -2724,15 +2749,15 @@ def run(
                   corpus_dir)
     if usage_log:
         _log.info("usage log    → %s", usage_log)
-        _log.info("dashboard    → http://%s:%d/dashboard"
+        _log.info("dashboard    → http://%s:%d/savings"
                   " (refresh=%ds)", host, port, dashboard_refresh)
     else:
-        _log.info("dashboard    → http://%s:%d/dashboard"
+        _log.info("dashboard    → http://%s:%d/savings"
                   " (no usage_log; will show empty state)", host, port)
-    _log.info("developer    → http://%s:%d/__telos/developer"
-              " (live session inspector; JSON at /__telos/developer.json)",
+    _log.info("developer    → http://%s:%d/developer"
+              " (live session inspector; JSON at /developer.json)",
               host, port)
-    _log.info("traces       → http://%s:%d/__telos/traces", host, port)
+    _log.info("traces       → http://%s:%d/traces", host, port)
     if strict:
         _log.info("strict mode ON — a TELOS failure returns 500 (no degradation to passthrough)")
     web.run_app(app, host=host, port=port, print=None, access_log=None)

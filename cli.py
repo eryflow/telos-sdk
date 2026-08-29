@@ -8,7 +8,7 @@ Subcommands:
 - ``telos uninstall``     undo the injection from ``telos init`` (per-harness with ``--harness``; ``--purge`` fully removes telos)
 - ``telos ccswitch``      coexist with cc-switch: ``status`` / ``sync`` (re-chain telos in front of cc-switch's active provider)
 - ``telos gateway``       start / stop / view the gateway
-- ``telos dashboard``     open the dashboard in a browser (``restart`` cycles the gateway serving it)
+- ``telos dashboard``     open the Context Control Plane (``--savings`` opens token savings)
 - ``telos status``        one-shot overview: harness injection + gateway + traffic forwarding
 - ``telos mode``          switch the optimization mode (hot-updates the running gateway)
 - ``telos alias``         set the harness the bare ``telos`` enters by default
@@ -328,7 +328,8 @@ def _cmd_launch_harness(name: str) -> int:
 def _cmd_dashboard(rest: list[str]) -> int:
     """``telos dashboard [restart|reset]``.
 
-    Bare: gateway running → open the live dashboard; otherwise build static HTML.
+    Bare: gateway running → open the Context Control Plane; ``--savings`` opens
+    the legacy token-savings view. Without a gateway, static output is savings-only.
     ``restart``: restart the gateway that serves the dashboard, then reopen it.
     ``reset``:   clear the usage log → zero the dashboard (``--hard`` skips backup).
     """
@@ -336,6 +337,7 @@ def _cmd_dashboard(rest: list[str]) -> int:
     flags = rest[1:] if verb else rest
     no_open = "--no-open" in flags
     force_static = "--static" in flags
+    savings = "--savings" in flags
 
     if verb is not None and verb not in ("restart", "reset"):
         print(f"error: unknown dashboard verb {verb!r}; expected 'restart' or 'reset'",
@@ -352,7 +354,10 @@ def _cmd_dashboard(rest: list[str]) -> int:
 
     state = daemon.read_state()
     if state is not None and not force_static:
-        url = control.dashboard_url(state.host, state.port)
+        url = (
+            control.savings_url(state.host, state.port)
+            if savings else control.dashboard_url(state.host, state.port)
+        )
         print(f"dashboard → {url}")
         if not no_open:
             webbrowser.open(url)
@@ -772,7 +777,7 @@ def _print_usage() -> None:
         "  uninstall   undo the injection from 'init' (all harnesses, or one via --harness; --purge fully removes telos)\n"
         "  ccswitch    coexist with cc-switch: status (is it active, is telos chained) | sync (re-chain after a switch)\n"
         "  gateway     start / stop / view the gateway (start|stop|status|restart)\n"
-        "  dashboard   open the saved-token / saved-$ dashboard in a browser (dashboard restart restarts it; dashboard reset zeroes it)\n"
+        "  dashboard   open Context Control (--savings opens token savings; reset zeroes savings)\n"
         "  status      one-shot overview of harness injection, the gateway, and traffic forwarding (--json for machine-readable)\n"
         "  mode        switch the optimization mode (none|telos|rtk|both), hot-updates the running gateway\n"
         "  alias       set the harness the bare telos enters by default\n"
@@ -799,6 +804,7 @@ def _print_usage() -> None:
         "  telos evolve --task 'code defect repair'\n"
         "  telos                       # enter the favorite harness\n"
         "  telos dashboard\n"
+        "  telos dashboard --savings\n"
         "  telos dashboard restart\n"
         "  telos dashboard reset\n"
         "  telos status\n"

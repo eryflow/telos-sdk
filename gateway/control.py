@@ -23,7 +23,11 @@ def _control_url(host: str, port: int) -> str:
 
 
 def dashboard_url(host: str, port: int) -> str:
-    return f"http://{host}:{port}/dashboard"
+    return f"http://{host}:{port}/"
+
+
+def savings_url(host: str, port: int) -> str:
+    return f"http://{host}:{port}/savings"
 
 
 def get_mode(host: str, port: int) -> str:

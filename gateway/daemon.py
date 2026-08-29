@@ -52,7 +52,10 @@ class GatewayState:
         return f"http://{self.host}:{self.port}"
 
     def dashboard_url(self) -> str:
-        return f"{self.base_url()}/dashboard"
+        return f"{self.base_url()}/"
+
+    def savings_url(self) -> str:
+        return f"{self.base_url()}/savings"
 
 
 # ---------------------------------------------------------------------------

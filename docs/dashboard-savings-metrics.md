@@ -1,9 +1,9 @@
 # Savings Dashboard Metrics
 
-Entry point: `GET /__telos/dashboard` (embedded in the proxy) or the CLI:
+Entry point: `GET /savings` (embedded in the proxy) or the CLI:
 
 ```sh
-telos dashboard --usage-log ~/.telos/usage.jsonl --out savings.html
+python -m telos.scripts.build_savings_dashboard --usage-log ~/.telos/usage.jsonl --out savings.html
 ```
 
 Source: [scripts/build_savings_dashboard.py](../scripts/build_savings_dashboard.py).
@@ -157,7 +157,7 @@ The three tables have the same structure, sorted by `cache_read` descending for 
 | `saved $` | a bar + a number. The bar takes the "largest saved amount" in this table as 100% |
 
 > The session table keeps only the top 15 rows — long sessions accumulate high cache_read and new sessions rank lower;
-> to see the full set use `/__telos/developer.json`.
+> to see the full set use `/developer.json`.
 
 ---
 

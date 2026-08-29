@@ -565,7 +565,7 @@ The agent sets `ANTHROPIC_BASE_URL=http://127.0.0.1:7171`, with zero code change
 - **`proxy/server.py`** — aiohttp reverse proxy. `POST /v1/messages` is forwarded after passing through
   the TELOS pipeline; SSE streaming is supported (side-channel parsing of `message_start` /
   `message_delta` to extract usage); other paths are transparently passed through. It embeds
-  `/__telos/dashboard`, `/__telos/developer`, `/__telos/developer.json`.
+  `/savings`, `/developer`, `/developer.json` (with legacy aliases under `/__telos`).
   Default non-strict: on TELOS failure it degrades to passthrough (`--strict` changes it to return 500).
 - **`proxy/pipeline.py`** — `process_anthropic_request(raw, ...)` is a pure function,
   splitting out parse → bridge → emit, shared by the proxy and the transport, eliminating wire drift.
@@ -682,13 +682,13 @@ Shared by the proxy and the SDK transport. One jsonl line per call. Key fields: 
 
 ### 12.2 Savings Dashboard ([build_savings_dashboard.py](../scripts/build_savings_dashboard.py))
 
-`telos dashboard` or the proxy-embedded `/__telos/dashboard`. Aggregates usage_log into
+`telos dashboard --savings` or the proxy-embedded `/savings`. Aggregates usage_log into
 "how many tokens / how many dollars saved". Includes the 2026 price table (with the cache_write 5m/1h split).
 The live dashboard intentionally stays focused on savings totals, timeline, and breakdowns by harness / model / session; replay and showcase comparison records keep their `compare_group` metadata outside this page.
 
 ### 12.3 Developer Page ([build_developer_page.py](../scripts/build_developer_page.py))
 
-The proxy-embedded `/__telos/developer`. Renders the IR
+The proxy-embedded `/developer`. Renders the IR
 structure of all sessions **currently in memory**, the PIN/FOLD/DROP character distribution of prompt regions, a recent-calls table, a per-message band
 view, and tool-call statistics. The data source is the `SessionInspector` of `proxy/inspector.py`
 (an OrderedDict LRU, keeping the most recent `INSPECTOR_HISTORY=25` calls per session).

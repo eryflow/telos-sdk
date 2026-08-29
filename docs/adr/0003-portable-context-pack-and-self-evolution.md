@@ -474,16 +474,16 @@ telos evolve rollback --task code-defect-repair
 首版不增加同义命令。Web 与 CLI 共用 loopback API：
 
 ```text
-POST /__telos/api/v1/packs
-GET  /__telos/api/v1/packs/{id}
-POST /__telos/api/v1/packs/{id}/validate
-POST /__telos/api/v1/handoffs/plan
-POST /__telos/api/v1/handoffs
-GET  /__telos/api/v1/task-runs/{id}
-GET  /__telos/api/v1/evolution/{task-type}
-POST /__telos/api/v1/evaluations
-POST /__telos/api/v1/profile-revisions/{id}/promote
-POST /__telos/api/v1/task-types/{id}/rollback
+POST /api/v1/packs
+GET  /api/v1/packs/{id}
+POST /api/v1/packs/{id}/validate
+POST /api/v1/handoffs/plan
+POST /api/v1/handoffs
+GET  /api/v1/task-runs/{id}
+GET  /api/v1/evolution/{task-type}
+POST /api/v1/evaluations
+POST /api/v1/profile-revisions/{id}/promote
+POST /api/v1/task-types/{id}/rollback
 ```
 
 Harness 由 TELOS 启动时继承 `TELOS_ATTEMPT_ID`，CLI 可据此定位当前 Attempt。没有该变量且不存在

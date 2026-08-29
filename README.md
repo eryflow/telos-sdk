@@ -55,7 +55,7 @@ flowchart LR
     O -. "manual promote / rollback" .-> H
 ```
 
-`TaskType → TaskRun → Attempt` owns task identity above Harness sessions. An immutable Context Pack captures objective, policy, progress, memory, normalized conversation, workspace state, and provenance; Trace trees remain the evidence layer. Open `http://127.0.0.1:7171/__telos/` for the Context Control Plane and `.../__telos/traces` for raw evidence.
+`TaskType → TaskRun → Attempt` owns task identity above Harness sessions. An immutable Context Pack captures objective, policy, progress, memory, normalized conversation, workspace state, and provenance; Trace trees remain the evidence layer. Open `http://127.0.0.1:7171/` for the Context Control Plane and `.../traces` for raw evidence.
 
 <a id="what-ships-today"></a>
 
@@ -101,10 +101,11 @@ telos status
 
 Start a new harness process after `telos init`; already-running processes do not retroactively reload their provider configuration.
 
-For savings and traffic visibility:
+Open the Context Control Plane; token savings remains a separate view:
 
 ```bash
 telos dashboard
+telos dashboard --savings
 ```
 
 ## Private and portable by default
@@ -145,7 +146,7 @@ Install the adapters, then inspect the unified tree locally:
 telos init --harness codex
 telos init --harness kimi-code
 telos init --harness deepseek-harness --replace-telemetry-backend
-# http://127.0.0.1:7171/__telos/traces
+# http://127.0.0.1:7171/traces
 ```
 
 If another program named `dsh` appears first on `PATH`, point TELOS at the
@@ -191,7 +192,7 @@ In an existing real six-turn OpenClaw measurement:
 | Passthrough | 24,151 | 0 | **$0.3623** |
 | TELOS | 0 | 18,701 | **$0.0281 (−92.3%)** |
 
-SWE-bench Verified measured `−52.8%` new input and `−40.5%` end-to-end cost. The A/B resolved-rate comparison found no statistically significant regression (McNemar `p = 0.66`). Savings vary with workload and provider cache pricing; `telos dashboard` reports the absolute cost for your own traffic.
+SWE-bench Verified measured `−52.8%` new input and `−40.5%` end-to-end cost. The A/B resolved-rate comparison found no statistically significant regression (McNemar `p = 0.66`). Savings vary with workload and provider cache pricing; `telos dashboard --savings` reports the absolute cost for your own traffic.
 
 See the [protocol](https://docs.telosai.pro/en/concepts/protocol), [benchmark methodology](https://docs.telosai.pro/en/benchmark/swebench), and [support matrix](https://docs.telosai.pro/en/reference/support-matrix).
 
