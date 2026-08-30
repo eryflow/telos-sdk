@@ -28,6 +28,23 @@ def test_task_cli_is_explicit_and_freezes_an_execution(tmp_path, monkeypatch) ->
     assert result == 0
     task_id = output.split("Task ", 1)[1].split()[0]
 
+    state_file = tmp_path / "state.json"
+    state_file.write_text('{"status":"ready"}')
+    result, output = _run([
+        "task", "checkpoint", task_id, "--state-file", str(state_file),
+        "--evidence", "trace:setup",
+    ])
+    assert result == 0
+    assert "state " in output and "→ ready" in output
+    with SQLiteTraceStore(home / "telos.db") as store:
+        page = store.create_wiki_page(title="Blur knowledge")
+        claim = store.add_wiki_claim(page["id"], content="Measure the baseline first")
+        store.bind_task_knowledge(task_id, [claim["id"]])
+    result, output = _run(["task", "show", task_id])
+    assert result == 0
+    assert "State " in output and "ready" in output
+    assert "1 Wiki" in output
+
     result, output = _run([
         "task", "execute", task_id, "--harness", "codex", "--no-exec",
     ])

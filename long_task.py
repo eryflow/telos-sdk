@@ -115,9 +115,10 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Task {task['id']}  {task['status']}\n  {task['name']}: {task['goal']}")
                 state = detail.get("current_state")
                 if state:
-                    print(f"  State r{state['revision']}  {state['status']}")
+                    print(f"  State {state['id'][:8]}  {state['status']}")
                 print(f"  Executions {len(detail.get('executions', []))}")
-                print(f"  Knowledge  {len(detail.get('knowledge', []))}")
+                bound = store.list_task_bound_knowledge(task["id"])
+                print(f"  Knowledge  {len(detail.get('knowledge', []))} local · {len(bound)} Wiki")
                 print(f"  Skills     {len(detail.get('skills', []))}")
                 return 0
 
@@ -129,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
                     task_execution_id=args.execution_id,
                     audit=_json_file(args.audit_file, default=None),
                 )
-                print(f"Task {args.task_id} state r{revision['revision']} → {revision['status']}")
+                print(f"Task {args.task_id} state {revision['id'][:8]} → {revision['status']}")
                 return 0
 
             if args.command == "evolve":

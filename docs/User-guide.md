@@ -298,9 +298,9 @@ authenticated `/api/v1/tasks` endpoint explicitly creates a durable Task:
 
 ```bash
 telos task create \
-  --name background-blur-optimizer \
-  --goal "make portrait background blur faster without crossing the quality gate" \
-  --workspace ./background-blur
+  --name mlx-metal-gqa-optimizer \
+  --goal "beat the MLX GQA attention baseline with a correct bf16 Metal kernel" \
+  --workspace ./openevolve/examples/mlx_metal_kernel_opt
 
 telos task execute <task-id> --harness codex --no-exec
 telos run launch <attempt-id>
@@ -430,7 +430,7 @@ The runner reads the public Case/Profile/Harness/Run payload and must echo `harn
 
 The export command writes `sft.jsonl`, `preference.jsonl`, and `rl.jsonl`, each retaining immutable evidence identifiers.
 
-For a concrete long-running example, see [the OpenEvolve-inspired background-blur self-evolution task](self-evolution-background-blur-task.md).
+For a concrete long-running example, see [the OpenEvolve MLX Metal kernel self-evolution task](self-evolution-mlx-metal-kernel-task.md).
 
 ---
 

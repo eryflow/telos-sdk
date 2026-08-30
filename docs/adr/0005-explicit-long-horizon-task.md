@@ -293,20 +293,20 @@ Overview | State | Executions | Knowledge | Skills | Agent | Evidence | Evolutio
 
 ## 示例
 
-“怎样给一张照片添加背景模糊”通常是普通对话，不应自动创建 Task。
+“Metal kernel 如何做向量化”通常是普通对话，不应自动创建 Task。
 
-参考 OpenEvolve 官方 [`background_blur`](https://github.com/algorithmicsuperintelligence/openevolve/tree/main/examples/background_blur)，用户可以显式创建“持续优化视频人像背景虚化热点函数”Task：
+参考 OpenEvolve 官方 [`mlx_metal_kernel_opt`](https://github.com/algorithmicsuperintelligence/openevolve/tree/main/examples/mlx_metal_kernel_opt)，用户可以显式创建“持续优化 Qwen3 GQA Metal kernel”Task：
 
-- Goal：从正确但缓慢的 `O(k²)` 二维高斯卷积开始，在画质硬门禁内最大化速度；
-- Contract：mean SSIM ≥ 0.98、worst-frame ≥ 0.95、worst-region ≥ 0.90，任一失败得 `0`；
-- State：当前最佳候选、轮次、MAP-Elites 单元、未解决失败、质量/速度和下一步；
-- Knowledge：stale background 作弊模式、局部损伤风险、有效优化和计时陷阱；
-- Skills：经多次 Execution 验证的 cascade evaluation、对抗测试和交错计时；
-- `agent.md`：稳定的质量优先、证据更新和失败处理规则，不保存具体候选或指标；
-- Execution：每轮固定 State/Knowledge/Skill/Agent revision，保存候选 diff、三级评估、artifacts 和 Trace；
+- Goal：让 Qwen3-0.6B-bf16 的 `16:8` GQA 自定义 Metal kernel 在 Apple Silicon 上超过 MLX attention 基线；
+- Contract：subprocess hook 生效、Metal 编译通过、bf16 correctness `>= 0.90`、整体 direct speedup `> 1.0`；
+- State：当前最佳 kernel、父候选、轮次、逐 benchmark speedup、编译/正确性失败、环境和下一步；
+- Knowledge：bf16 Metal 语法陷阱、短/长上下文回退、有效内存/SIMD 策略、profiling 和测量陷阱；
+- Skills：经多次 Execution 验证的 hook 检查、correctness gate、统计 timing、回归检查和 profiling；
+- `agent.md`：稳定的正确性优先、完整报告和证据更新规则，不保存具体 kernel 或跑分；
+- Execution：每轮固定 State/Knowledge/Skill/Agent revision，保存 kernel diff、编译日志、benchmark、artifacts 和 Trace；
 - Self-evolve：先记录失败/成功 Knowledge，再沉淀验证过的 Skill，最后才处理残余 `agent.md` 行为问题。
 
-详细过程见 [`self-evolution-background-blur-task.md`](../self-evolution-background-blur-task.md)。
+详细过程见 [`self-evolution-mlx-metal-kernel-task.md`](../self-evolution-mlx-metal-kernel-task.md)。
 
 ## 验收
 
