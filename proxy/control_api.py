@@ -201,6 +201,7 @@ class ControlAPI:
             "executions": self.store.list_task_executions(task_id),
             "knowledge": self.store.list_task_knowledge(task_id),
             "skills": self.store.list_task_skills(task_id),
+            "agent_revisions": self.store.list_task_agent_revisions(task_id),
         })
 
     async def task_executions(self, request: web.Request) -> web.Response:
@@ -215,8 +216,6 @@ class ControlAPI:
                 task_id=request.match_info["task_id"],
                 harness=harness,
                 task_run_id=body.get("task_run_id"),
-                knowledge_manifest=body.get("knowledge_manifest"),
-                skill_manifest=body.get("skill_manifest"),
             )
             attempt = self.store.create_attempt(
                 task_run_id=execution["task_run_id"],
@@ -248,6 +247,28 @@ class ControlAPI:
                 audit=body.get("audit"),
             )
             return web.json_response(result, status=201)
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+
+    async def task_execution_outcome(self, request: web.Request) -> web.Response:
+        if denied := self._write_allowed(request):
+            return denied
+        try:
+            body = await self._body(request)
+            outcome = str(body.get("outcome") or "").strip()
+            if outcome not in {"pass", "fail"}:
+                raise ValueError("outcome must be pass or fail")
+            evidence = body.get("evidence_refs") or []
+            if not isinstance(evidence, list) or not evidence or not all(
+                isinstance(item, str) and item.strip() for item in evidence
+            ):
+                raise ValueError("evidence_refs must be a non-empty list of strings")
+            result = self.store.set_task_execution_status(
+                request.match_info["execution_id"],
+                "completed" if outcome == "pass" else "failed",
+                outcome=outcome, evidence_refs=evidence, trusted=True,
+            )
+            return web.json_response(result)
         except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
             return web.json_response({"error": str(exc)}, status=400)
 
@@ -302,6 +323,32 @@ class ControlAPI:
             )
             return web.json_response(result, status=201)
         except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+
+    async def task_skill_promote(self, request: web.Request) -> web.Response:
+        if denied := self._write_allowed(request):
+            return denied
+        try:
+            return web.json_response(
+                self.store.promote_task_skill(request.match_info["skill_id"]),
+            )
+        except (TypeError, ValueError) as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+
+    async def task_agent_promote(self, request: web.Request) -> web.Response:
+        if denied := self._write_allowed(request):
+            return denied
+        try:
+            body = await self._body(request)
+            evidence = body.get("evidence_refs") or []
+            if not isinstance(evidence, list) or not evidence or not all(
+                isinstance(item, str) and item.strip() for item in evidence
+            ):
+                raise ValueError("evidence_refs must be a non-empty list of strings")
+            return web.json_response(self.store.promote_task_agent_revision(
+                request.match_info["revision_id"], evidence_refs=evidence,
+            ))
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
             return web.json_response({"error": str(exc)}, status=400)
 
     async def task_knowledge_bindings(self, request: web.Request) -> web.Response:

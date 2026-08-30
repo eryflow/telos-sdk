@@ -18,6 +18,9 @@ def test_context_control_is_goal_first_and_uses_public_routes() -> None:
     assert 'id="createLongTask"' in html
     assert "普通 TaskRun，不会自动成为 Long Task" in html
     assert "write('/tasks'" in html
+    assert "/task-executions/${encodeURIComponent(button.dataset.execution)}/outcome" in html
+    assert "/task-skills/${encodeURIComponent(button.dataset.promoteSkill)}/promote" in html
+    assert "/task-agent-revisions/${encodeURIComponent(button.dataset.promoteAgent)}/promote" in html
     assert all(label in html for label in (
         "Overview", "State", "Executions", "Skills", "Agent", "Evidence", "Evolution",
     ))

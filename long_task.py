@@ -64,6 +64,18 @@ def _parser() -> argparse.ArgumentParser:
     evolve.add_argument("task_id")
     evolve.add_argument("--execution-id", required=True)
     evolve.add_argument("--changes-file", required=True)
+
+    outcome = sub.add_parser("outcome")
+    outcome.add_argument("execution_id")
+    outcome.add_argument("--outcome", choices=("pass", "fail"), required=True)
+    outcome.add_argument("--evidence", action="append", required=True)
+
+    promote_skill = sub.add_parser("promote-skill")
+    promote_skill.add_argument("skill_id")
+
+    promote_agent = sub.add_parser("promote-agent")
+    promote_agent.add_argument("revision_id")
+    promote_agent.add_argument("--evidence", action="append", required=True)
     return parser
 
 
@@ -138,6 +150,27 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 return 0
 
+            if args.command == "outcome":
+                result = store.set_task_execution_status(
+                    args.execution_id,
+                    "completed" if args.outcome == "pass" else "failed",
+                    outcome=args.outcome, evidence_refs=args.evidence, trusted=True,
+                )
+                print(f"TaskExecution {result['id']} → trusted {result['outcome']}")
+                return 0
+
+            if args.command == "promote-skill":
+                result = store.promote_task_skill(args.skill_id)
+                print(f"Skill {result['id']} → {result['state']}")
+                return 0
+
+            if args.command == "promote-agent":
+                result = store.promote_task_agent_revision(
+                    args.revision_id, evidence_refs=args.evidence,
+                )
+                print(f"Agent {result['id']} → {result['state']}")
+                return 0
+
             detail = store.get_task(args.task_id)
             if detail is None:
                 raise ValueError(f"Task does not exist: {args.task_id}")
@@ -156,12 +189,9 @@ def main(argv: list[str] | None = None) -> int:
             if args.no_exec:
                 print(f"telos run launch {attempt['id']}")
                 return 0
-            attempt_id, execution_id = attempt["id"], execution["id"]
+            attempt_id = attempt["id"]
         from telos.task_run import main as run_main
-        result = run_main(["launch", attempt_id])
-        with SQLiteTraceStore(home / "telos.db") as store:
-            store.set_task_execution_status(execution_id, "failed" if result else "completed")
-        return result
+        return run_main(["launch", attempt_id])
     except (OSError, TypeError, ValueError) as exc:
         parser.error(str(exc))
         return 2

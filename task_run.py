@@ -30,6 +30,27 @@ def ensure_task_profile(store: SQLiteTraceStore, name: str, home: Path) -> dict:
     return task
 
 
+def task_execution_prompt(detail: dict) -> str:
+    """Serialize the frozen long-task context into one Harness-neutral prompt."""
+    task, execution = detail["task"], detail["execution"]
+    sections = [
+        "# Telos Long Task Execution",
+        f"Execution ID: {execution['id']}",
+        f"## Goal\n{task['goal']}",
+        "## Contract\n" + json.dumps(task.get("contract") or {}, ensure_ascii=False, indent=2),
+        "## Frozen State\n" + json.dumps(detail["state"], ensure_ascii=False, indent=2),
+        f"## Frozen agent.md\n{detail['agent']['agent_md']}",
+        "## Frozen Knowledge\n" + json.dumps(detail["knowledge"], ensure_ascii=False, indent=2),
+        "## Frozen Skills\n" + json.dumps(detail["skills"], ensure_ascii=False, indent=2),
+        (
+            "Continue this explicitly defined long task from the frozen context above. "
+            "Treat it as read-only input for this execution. Record new facts as Knowledge "
+            "before proposing reusable Skills or agent.md changes, and cite evidence for state."
+        ),
+    ]
+    return "\n\n".join(sections)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="telos run", description="Own one goal across Harness Attempts.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -74,10 +95,17 @@ def main(argv: list[str] | None = None) -> int:
             if attempt is None:
                 parser.error(f"Attempt does not exist: {args.attempt_id}")
             run = store.get_task_run(attempt["task_run_id"])["task_run"]
+            execution_detail = (
+                store.get_task_execution(attempt["task_execution_id"])
+                if attempt.get("task_execution_id") else None
+            )
+            prompt = task_execution_prompt(execution_detail) if execution_detail else run["goal"]
             workspace = Path(run.get("workspace", {}).get("root") or Path.cwd()).resolve()
             if not workspace.is_dir():
                 parser.error(f"Workspace is not a directory: {workspace}")
             store.set_attempt_status(attempt["id"], "running")
+            if execution_detail:
+                store.set_task_execution_status(attempt["task_execution_id"], "running")
             os.chdir(workspace)
             os.environ["TELOS_ATTEMPT_ID"] = attempt["id"]
             os.environ["TELOS_TASK_PLUGINS"] = json.dumps(
@@ -85,14 +113,18 @@ def main(argv: list[str] | None = None) -> int:
             )
             from telos.cli import _cmd_launch_harness
             arguments = {
-                "codex": ["exec", "--approve-for-me", "--skip-git-repo-check", run["goal"]],
-                "kimi-code": ["--auto", "--prompt", run["goal"]],
-                "deepseek-harness": ["--profile", "headless", run["goal"]],
+                "codex": ["exec", "--approve-for-me", "--skip-git-repo-check", prompt],
+                "kimi-code": ["--auto", "--prompt", prompt],
+                "deepseek-harness": ["--profile", "headless", prompt],
             }.get(attempt["harness"], [])
             result = _cmd_launch_harness(attempt["harness"], arguments, replace=False)
             status = "error" if result else "ok"
             store.set_attempt_status(attempt["id"], status)
             store.set_task_run_status(run["id"], status)
+            if execution_detail:
+                store.set_task_execution_status(
+                    attempt["task_execution_id"], "failed" if result else "completed",
+                )
             return result
         task = ensure_task_profile(store, args.task, home)
         run = store.create_task_run(

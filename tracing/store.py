@@ -740,6 +740,10 @@ class SQLiteTraceStore:
                 "SELECT * FROM task_skills WHERE task_id=? ORDER BY created_at_us,id",
                 (row_id,),
             ).fetchall()
+            agents = self._connection.execute(
+                "SELECT * FROM task_agent_revisions WHERE task_id=? ORDER BY created_at_us,id",
+                (row_id,),
+            ).fetchall()
         result = self._decode_control_row(task)
         result["self_evolve"] = bool(result["self_evolve"])
         result["current_state"] = None if state is None else self._decode_control_row(state)
@@ -747,6 +751,7 @@ class SQLiteTraceStore:
         result["executions"] = [self._decode_control_row(row) for row in executions]
         result["knowledge"] = [self._decode_control_row(row) for row in knowledge]
         result["skills"] = [self._decode_control_row(row) for row in skills]
+        result["agent_revisions"] = [self._decode_control_row(row) for row in agents]
         return result
 
     def create_task_execution(
@@ -785,9 +790,13 @@ class SQLiteTraceStore:
                 knowledge_manifest = self._task_knowledge_manifest(task_id)
             if skill_manifest is None:
                 skill_manifest = [
-                    {"id": row["id"], "name": row["name"]}
+                    {
+                        "id": row["id"], "name": row["name"],
+                        "content": json.loads(row["content_json"]),
+                        "digest": self._content_digest(json.loads(row["content_json"])),
+                    }
                     for row in self._connection.execute(
-                        """SELECT id,name FROM task_skills
+                        """SELECT id,name,content_json FROM task_skills
                            WHERE task_id=? AND state='production'
                            ORDER BY created_at_us,id""", (task_id,),
                     ).fetchall()
@@ -818,6 +827,56 @@ class SQLiteTraceStore:
             ).fetchall()
         return [self._decode_control_row(row) for row in rows]
 
+    def get_task_execution(self, row_id: str) -> dict[str, Any] | None:
+        """Return the exact immutable context selected when an execution was created."""
+        with self._lock:
+            execution = self._connection.execute(
+                "SELECT * FROM task_executions WHERE id=?", (row_id,),
+            ).fetchone()
+            if execution is None:
+                return None
+            task = self._connection.execute(
+                "SELECT * FROM tasks WHERE id=?", (execution["task_id"],),
+            ).fetchone()
+            state = self._connection.execute(
+                "SELECT * FROM task_state_revisions WHERE id=?",
+                (execution["state_revision_id"],),
+            ).fetchone()
+            agent = self._connection.execute(
+                "SELECT * FROM task_agent_revisions WHERE id=?",
+                (execution["agent_revision_id"],),
+            ).fetchone()
+            knowledge = json.loads(execution["knowledge_manifest_json"])
+            skills = json.loads(execution["skill_manifest_json"])
+            for item in knowledge:
+                if "content" in item:
+                    continue
+                claim = self._connection.execute(
+                    "SELECT kind,content,source_refs_json FROM wiki_claims WHERE id=?",
+                    (item.get("id"),),
+                ).fetchone()
+                if claim is not None:
+                    item.update(
+                        kind=claim["kind"], content=claim["content"],
+                        source_refs=json.loads(claim["source_refs_json"]), source="wiki",
+                    )
+            for item in skills:
+                if "content" in item:
+                    continue
+                skill = self._connection.execute(
+                    "SELECT content_json FROM task_skills WHERE id=?", (item.get("id"),),
+                ).fetchone()
+                if skill is not None:
+                    item["content"] = json.loads(skill["content_json"])
+        return {
+            "execution": self._decode_control_row(execution),
+            "task": self._decode_control_row(task),
+            "state": self._decode_control_row(state),
+            "agent": self._decode_control_row(agent),
+            "knowledge": knowledge,
+            "skills": skills,
+        }
+
     def set_task_execution_status(
         self, row_id: str, status: str, *, outcome: str | None = None,
         evidence_refs: Iterable[Any] | None = None, trusted: bool = False,
@@ -832,7 +891,10 @@ class SQLiteTraceStore:
             raise ValueError("trusted execution requires a resolved outcome and evidence")
         timestamp = now_us()
         with self._transaction():
-            self._validate_reference("task_executions", row_id, "task_execution_id")
+            current = self._validate_reference("task_executions", row_id, "task_execution_id")
+            assert current is not None
+            if current["trusted"]:
+                raise ValueError("trusted task execution outcome is immutable")
             finished = timestamp if status in {"completed", "failed", "cancelled"} else None
             self._connection.execute(
                 """UPDATE task_executions SET status=?,outcome=?,evidence_refs_json=?,
@@ -957,6 +1019,14 @@ class SQLiteTraceStore:
         assert row is not None
         return self._decode_control_row(row)
 
+    def list_task_agent_revisions(self, task_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM task_agent_revisions WHERE task_id=? ORDER BY created_at_us,id",
+                (task_id,),
+            ).fetchall()
+        return [self._decode_control_row(row) for row in rows]
+
     def add_task_knowledge(
         self, task_id: str, *, kind: str, content: Any, execution_id: str,
         status: str = "proposed", source_refs: Iterable[Any] | None = None,
@@ -997,7 +1067,9 @@ class SQLiteTraceStore:
         execution_refs: Iterable[str], state: str = "candidate",
         row_id: str | None = None,
     ) -> dict[str, Any]:
-        if state not in {"candidate", "production", "rejected"}:
+        if state == "production":
+            raise ValueError("production skills require explicit promotion")
+        if state not in {"candidate", "rejected"}:
             raise ValueError(f"unsupported task skill state: {state}")
         refs = list(dict.fromkeys(execution_refs))
         if not name.strip():
@@ -1014,7 +1086,7 @@ class SQLiteTraceStore:
                 if execution["task_id"] != task_id:
                     raise ValueError("execution belongs to another task")
                 executions.append(execution)
-            if state in {"candidate", "production"} and (
+            if state == "candidate" and (
                 len(executions) < 3
                 or any(not row["trusted"] or row["outcome"] not in {"pass", "fail"}
                        or not json.loads(row["evidence_refs_json"]) for row in executions)
@@ -1038,6 +1110,31 @@ class SQLiteTraceStore:
                 (task_id,),
             ).fetchall()
         return [self._decode_control_row(row) for row in rows]
+
+    def promote_task_skill(self, row_id: str) -> dict[str, Any]:
+        with self._transaction():
+            row = self._validate_reference("task_skills", row_id, "skill_id")
+            assert row is not None
+            if row["state"] != "candidate":
+                raise ValueError("only candidate skills can be promoted")
+            execution_ids = json.loads(row["execution_refs_json"])
+            executions = [self._validate_reference(
+                "task_executions", execution_id, "execution_id"
+            ) for execution_id in execution_ids]
+            if len(executions) < 3 or any(
+                not execution["trusted"] or execution["outcome"] not in {"pass", "fail"}
+                or not json.loads(execution["evidence_refs_json"])
+                for execution in executions
+            ):
+                raise ValueError("skill promotion requires three trusted executions with evidence")
+            self._connection.execute(
+                "UPDATE task_skills SET state='production' WHERE id=?", (row_id,),
+            )
+            row = self._connection.execute(
+                "SELECT * FROM task_skills WHERE id=?", (row_id,),
+            ).fetchone()
+        assert row is not None
+        return self._decode_control_row(row)
 
     def create_wiki_page(
         self, *, title: str, category: str | None = None, content: str = "",
@@ -2279,12 +2376,16 @@ class SQLiteTraceStore:
 
     def _task_knowledge_manifest(self, task_id: str) -> list[dict[str, Any]]:
         rows = self._connection.execute(
-            """SELECT c.id,c.page_id,c.revision,c.digest
+            """SELECT c.id,c.page_id,c.revision,c.digest,c.kind,c.content,c.source_refs_json
                FROM task_knowledge_bindings b
                JOIN wiki_claims c ON c.id=b.claim_id
                WHERE b.task_id=? ORDER BY c.page_id,c.id""", (task_id,),
         ).fetchall()
-        manifest = [dict(row) for row in rows]
+        manifest = [{
+            "id": row["id"], "page_id": row["page_id"], "revision": row["revision"],
+            "digest": row["digest"], "kind": row["kind"], "content": row["content"],
+            "source_refs": json.loads(row["source_refs_json"]), "source": "wiki",
+        } for row in rows]
         local = self._connection.execute(
             """SELECT id,kind,content_json,execution_id FROM task_knowledge
                WHERE task_id=? AND status IN ('verified','promoted')

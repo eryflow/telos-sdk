@@ -176,11 +176,45 @@ async def test_control_api_creates_pack_and_reports_handoff_without_guessing(tmp
             assert response.status == 400  # one execution may add knowledge, not a Skill
             assert "three distinct trusted executions" in (await response.json())["error"]
 
+            response = await session.post(
+                base + f"/api/v1/task-executions/{execution['id']}/outcome",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"outcome": "pass", "evidence_refs": ["trace:test"]},
+            )
+            assert response.status == 200
+            assert (await response.json())["trusted"] == 1
+            extra = [store.create_task_execution(long_task["id"], harness="codex") for _ in range(2)]
+            for index, item in enumerate(extra):
+                store.set_task_execution_status(
+                    item["id"], "completed", outcome="pass",
+                    evidence_refs=[f"trace:extra:{index}"], trusted=True,
+                )
+            skill = store.add_task_skill(
+                long_task["id"], name="measure-score", content="Run the scorer",
+                execution_refs=[execution["id"], *(item["id"] for item in extra)],
+            )
+            agent = store.create_task_agent_revision(
+                long_task["id"], agent_md="Always run the scorer.",
+            )
+            response = await session.post(
+                base + f"/api/v1/task-skills/{skill['id']}/promote",
+                headers={"Authorization": f"Bearer {token}"}, json={},
+            )
+            assert response.status == 200
+            assert (await response.json())["state"] == "production"
+            response = await session.post(
+                base + f"/api/v1/task-agent-revisions/{agent['id']}/promote",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"evidence_refs": ["evaluation:test"]},
+            )
+            assert response.status == 200
+            assert (await response.json())["state"] == "production"
+
             response = await session.get(base + f"/api/v1/tasks/{long_task['id']}")
             detail = await response.json()
             assert response.status == 200
             assert detail["task"]["id"] == long_task["id"]
-            assert len(detail["executions"]) == 1
+            assert len(detail["executions"]) == 3
             assert (await (await session.get(
                 base + f"/api/v1/tasks/{long_task['id']}/knowledge"
             )).json())["items"][0]["content"] == "Baseline score is 0.4"
@@ -257,3 +291,32 @@ def test_dashboard_attempt_launch_reuses_the_existing_identity(tmp_path, monkeyp
     assert os.environ["TELOS_TASK_PLUGINS"] == "[]"
     with SQLiteTraceStore(tmp_path / "telos.db") as store:
         assert store.get_attempt(attempt["id"])["status"] == "ok"
+
+
+def test_long_task_launch_injects_the_frozen_execution_context(tmp_path, monkeypatch) -> None:
+    with SQLiteTraceStore(tmp_path / "telos.db") as store:
+        task = store.create_task(
+            name="blur", goal="make blur faster", contract={"quality": "SSIM >= .98"},
+            workspace={"root": str(tmp_path)}, agent_md="Never skip the quality gate.",
+        )
+        execution = store.create_task_execution(task["id"], harness="codex")
+        attempt = store.create_attempt(task_execution_id=execution["id"], harness="codex")
+
+    launched = []
+    monkeypatch.setattr("telos.task_run.telos_home", lambda: tmp_path)
+    monkeypatch.setattr("telos.task_run.os.chdir", lambda path: None)
+    monkeypatch.setenv("TELOS_ATTEMPT_ID", "")
+    monkeypatch.setenv("TELOS_TASK_PLUGINS", "")
+    monkeypatch.setattr(
+        "telos.cli._cmd_launch_harness",
+        lambda runtime, arguments, replace: launched.append(arguments[-1]) or 0,
+    )
+
+    assert task_run_main(["launch", attempt["id"]]) == 0
+    assert "make blur faster" in launched[0]
+    assert '"quality": "SSIM >= .98"' in launched[0]
+    assert "Never skip the quality gate." in launched[0]
+    with SQLiteTraceStore(tmp_path / "telos.db") as store:
+        resolved = store.get_task_execution(execution["id"])["execution"]
+        assert resolved["status"] == "completed"
+        assert resolved["trusted"] == 0  # requires a separate evidenced outcome

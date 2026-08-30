@@ -257,7 +257,7 @@ telos dashboard --static                 build a static token-savings report
 telos run start --task TYPE --goal GOAL --harness HARNESS
 telos run list|show|finish   own one TaskRun across Harness Attempts
 telos task create --name NAME --goal-file goal.md
-telos task list|show|execute|checkpoint|evolve
+telos task list|show|execute|checkpoint|outcome|evolve|promote-skill|promote-agent
 telos pack [--attempt ID]   create a semantic checkpoint (uses TELOS_ATTEMPT_ID by default)
 telos pack inspect ID
 telos pack export ID -o task.telosbundle
@@ -303,13 +303,24 @@ telos task create \
   --workspace ./background-blur
 
 telos task execute <task-id> --harness codex --no-exec
+telos run launch <attempt-id>
+telos task outcome <execution-id> --outcome pass --evidence trace:<trace-id>
 ```
 
 Every Task owns its Goal/Contract, immutable State revisions, `agent.md`, Knowledge,
 Skills and Executions. Each Execution freezes the revisions it uses. Verified evidence
 evolves in the order `Knowledge → Skill → agent.md`; a Skill Candidate requires three
 distinct trusted Executions, and `agent.md` changes remain candidates until explicitly
-promoted.
+promoted. Harness launch receives the frozen Goal, Contract, State, `agent.md`, Knowledge
+and Skills in one prompt. A zero exit status closes the Execution but does not trust it;
+`telos task outcome` (or Dashboard **Review & publish**) must attach evidence first.
+
+After `telos task evolve` creates candidates, publish them explicitly:
+
+```bash
+telos task promote-skill <skill-id>
+telos task promote-agent <agent-revision-id> --evidence evaluation:<evaluation-id>
+```
 
 Start an ordinary execution through TELOS so Harness hooks inherit an explicit Attempt identity:
 

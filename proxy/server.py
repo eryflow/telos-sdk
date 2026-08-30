@@ -2677,6 +2677,10 @@ def make_app(
         app.router.add_post(
             "/api/v1/tasks/{task_id}/state-patches", control_api.task_state_patches,
         )
+        app.router.add_post(
+            "/api/v1/task-executions/{execution_id}/outcome",
+            control_api.task_execution_outcome,
+        )
         app.router.add_get(
             "/api/v1/tasks/{task_id}/knowledge", control_api.task_knowledge,
         )
@@ -2685,6 +2689,13 @@ def make_app(
         )
         app.router.add_get("/api/v1/tasks/{task_id}/skills", control_api.task_skills)
         app.router.add_post("/api/v1/tasks/{task_id}/skills", control_api.task_skills)
+        app.router.add_post(
+            "/api/v1/task-skills/{skill_id}/promote", control_api.task_skill_promote,
+        )
+        app.router.add_post(
+            "/api/v1/task-agent-revisions/{revision_id}/promote",
+            control_api.task_agent_promote,
+        )
         app.router.add_post(
             "/api/v1/tasks/{task_id}/knowledge-bindings",
             control_api.task_knowledge_bindings,
@@ -2718,6 +2729,10 @@ def make_app(
             "/__telos/api/v1/tasks/{task_id}/state-patches",
             control_api.task_state_patches,
         )
+        app.router.add_post(
+            "/__telos/api/v1/task-executions/{execution_id}/outcome",
+            control_api.task_execution_outcome,
+        )
         app.router.add_get(
             "/__telos/api/v1/tasks/{task_id}/knowledge", control_api.task_knowledge,
         )
@@ -2729,6 +2744,14 @@ def make_app(
         )
         app.router.add_post(
             "/__telos/api/v1/tasks/{task_id}/skills", control_api.task_skills,
+        )
+        app.router.add_post(
+            "/__telos/api/v1/task-skills/{skill_id}/promote",
+            control_api.task_skill_promote,
+        )
+        app.router.add_post(
+            "/__telos/api/v1/task-agent-revisions/{revision_id}/promote",
+            control_api.task_agent_promote,
         )
         app.router.add_post(
             "/__telos/api/v1/tasks/{task_id}/knowledge-bindings",

@@ -64,7 +64,8 @@ def test_execution_freezes_state_agent_and_bound_wiki_claims(tmp_path) -> None:
         assert first["agent_revision_id"] != second["agent_revision_id"]
         assert first["knowledge_manifest"] == [{
             "id": first_claim["id"], "page_id": page["id"],
-            "revision": 1, "digest": first_claim["digest"],
+            "revision": 1, "digest": first_claim["digest"], "kind": "fact",
+            "content": "SSIM is a quality metric", "source_refs": [], "source": "wiki",
         }]
         assert {item["id"] for item in second["knowledge_manifest"]} == {
             second_claim["id"], local["id"],
@@ -74,6 +75,16 @@ def test_execution_freezes_state_agent_and_bound_wiki_claims(tmp_path) -> None:
         )
         assert local_snapshot["source"] == "task"
         assert local_snapshot["content"] == {"claim": "mean SSIM can hide local damage"}
+
+        store._connection.execute(
+            "UPDATE wiki_claims SET content='changed later' WHERE id=?", (second_claim["id"],),
+        )
+        frozen = store.get_task_execution(second["id"])
+        assert frozen is not None
+        assert frozen["state"]["next_action"] == "benchmark"
+        assert frozen["agent"]["agent_md"] == "Always run the quality gate."
+        wiki_snapshot = next(item for item in frozen["knowledge"] if item["source"] == "wiki")
+        assert wiki_snapshot["content"] == "Worst-region SSIM catches local damage"
 
 
 def test_state_completion_requires_audit_and_state_revisions_are_immutable(tmp_path) -> None:
@@ -127,14 +138,21 @@ def test_skill_requires_three_distinct_trusted_executions(tmp_path) -> None:
             )
 
         refs = [execution["id"] for execution in executions]
+        with pytest.raises(ValueError, match="immutable"):
+            store.set_task_execution_status(
+                executions[0]["id"], "failed", outcome="fail",
+                evidence_refs=["replacement"], trusted=True,
+            )
         candidate = store.add_task_skill(
             task["id"], name="quality-gated benchmark", content={"stages": 3},
             execution_refs=refs, state="candidate",
         )
-        production = store.add_task_skill(
-            task["id"], name="quality-gated benchmark", content={"stages": 3},
-            execution_refs=refs, state="production",
-        )
+        with pytest.raises(ValueError, match="explicit promotion"):
+            store.add_task_skill(
+                task["id"], name="quality-gated benchmark", content={"stages": 3},
+                execution_refs=refs, state="production",
+            )
+        production = store.promote_task_skill(candidate["id"])
         assert candidate["state"] == "candidate"
         assert production["state"] == "production"
 

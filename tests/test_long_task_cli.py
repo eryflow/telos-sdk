@@ -54,3 +54,34 @@ def test_ordinary_run_does_not_create_a_long_task(tmp_path, monkeypatch) -> None
     with SQLiteTraceStore(home / "telos.db") as store:
         assert store.list_tasks() == []
         assert store.list_task_runs()[0]["task_id"] is None
+
+
+def test_task_cli_resolves_execution_and_promotes_candidates(tmp_path, monkeypatch) -> None:
+    home = tmp_path / "telos"
+    monkeypatch.setenv("TELOS_HOME", str(home))
+    with SQLiteTraceStore(home / "telos.db") as store:
+        task = store.create_task(name="blur", goal="make blur faster")
+        executions = [store.create_task_execution(task["id"], harness="codex") for _ in range(3)]
+
+    for index, execution in enumerate(executions):
+        result, output = _run([
+            "task", "outcome", execution["id"], "--outcome", "pass",
+            "--evidence", f"trace:{index}",
+        ])
+        assert result == 0
+        assert "trusted pass" in output
+
+    with SQLiteTraceStore(home / "telos.db") as store:
+        skill = store.add_task_skill(
+            task["id"], name="benchmark", content="run gates",
+            execution_refs=[item["id"] for item in executions],
+        )
+        agent = store.create_task_agent_revision(task["id"], agent_md="Run the benchmark.")
+
+    assert _run(["task", "promote-skill", skill["id"]])[0] == 0
+    assert _run([
+        "task", "promote-agent", agent["id"], "--evidence", "evaluation:1",
+    ])[0] == 0
+    with SQLiteTraceStore(home / "telos.db") as store:
+        assert store.list_task_skills(task["id"])[0]["state"] == "production"
+        assert store.get_task(task["id"])["current_agent"]["id"] == agent["id"]

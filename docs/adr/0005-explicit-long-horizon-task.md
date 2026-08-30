@@ -244,20 +244,23 @@ skill_revisions
 telos task create --name NAME --goal-file goal.md
 telos task show <task-id>
 telos task execute <task-id> --harness codex
-telos task resume <execution-id> --harness kimi-code
-telos task checkpoint <task-id>
-telos task finish <task-id>
+telos task checkpoint <task-id> --state-file state.json --evidence trace:<id>
+telos task outcome <execution-id> --outcome pass --evidence trace:<id>
+telos task evolve <task-id> --execution-id <id> --changes-file changes.json
+telos task promote-skill <skill-id>
+telos task promote-agent <revision-id> --evidence evaluation:<id>
 ```
 
 ```text
 POST /api/v1/tasks
 GET  /api/v1/tasks/{id}
 POST /api/v1/tasks/{id}/executions
-POST /api/v1/task-executions/{id}/attempts
+POST /api/v1/task-executions/{id}/outcome
 POST /api/v1/tasks/{id}/state-patches
 GET  /api/v1/tasks/{id}/knowledge
 GET  /api/v1/tasks/{id}/skills
-GET  /api/v1/tasks/{id}/agent-revisions
+POST /api/v1/task-skills/{id}/promote
+POST /api/v1/task-agent-revisions/{id}/promote
 ```
 
 ### 12. Dashboard

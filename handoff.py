@@ -240,8 +240,10 @@ def prepare_handoff(
         pack["path"], destination, attempt_id=attempt_id, workspace=workspace,
         home=home, executables=executables,
     )
+    source_attempt = store.get_attempt(pack.get("source_attempt_id"))
     attempt = store.create_attempt(
         row_id=attempt_id, task_run_id=pack["task_run_id"], harness=destination,
+        task_execution_id=(source_attempt or {}).get("task_execution_id"),
         source_attempt_id=pack.get("source_attempt_id"), context_pack_id=pack_id,
         profile_revision_id=pack.get("profile_revision_id"), launch_plan=plan,
     )
