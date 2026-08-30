@@ -34,9 +34,10 @@ def test_empty_overview_renders() -> None:
         focus_session=None, refresh_seconds=5,
     )
     assert "TELOS · Trace inspector" in body
-    assert 'href="/">Context</a>' in body
+    assert 'href="/">Overview</a>' in body
+    assert 'href="/tasks">Long Tasks</a>' in body
     assert 'href="/savings">Savings</a>' in body
-    assert 'href="/traces">Evidence</a>' in body
+    assert 'href="/traces">Traces</a>' in body
     assert "0 session(s) tracked" in body
     assert "No sessions yet" in body
     assert 'content="5"' in body  # refresh tag

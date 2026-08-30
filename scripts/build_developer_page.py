@@ -516,10 +516,12 @@ def render_developer(
 </head><body>
 <div class="wrap">
 <nav class="tabs" aria-label="Dashboard views">
-  <a href="/">Context</a>
+  <a href="/">Overview</a>
+  <a href="/tasks">Long Tasks</a>
+  <a href="/knowledge">Wiki</a>
+  <a href="/traces">Traces</a>
   <a href="/savings">Savings</a>
   <a class="active" href="/developer">Developer</a>
-  <a href="/traces">Evidence</a>
 </nav>
 <header>
   <h1>TELOS · Trace inspector</h1>

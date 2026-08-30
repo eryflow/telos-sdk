@@ -130,8 +130,9 @@ def test_render_uses_logo_title_and_scrollable_tables() -> None:
     assert "<title>TELOS · Token Savings</title>" in html_doc
     assert 'rel="icon"' in html_doc
     assert "Token Savings" in html_doc
-    assert 'href="/">Context</a>' in html_doc
-    assert 'href="/traces">Evidence</a>' in html_doc
+    assert 'href="/">Overview</a>' in html_doc
+    assert 'href="/tasks">Long Tasks</a>' in html_doc
+    assert 'href="/traces">Traces</a>' in html_doc
     assert 'class="table-scroll"' in html_doc
     assert 'class="breakdown-table"' in html_doc
     print("✓ test_render_uses_logo_title_and_scrollable_tables")

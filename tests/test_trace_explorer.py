@@ -4,7 +4,9 @@ from telos.scripts.build_trace_explorer import render_trace_explorer
 def test_trace_explorer_is_self_contained_and_uses_requested_api() -> None:
     html = render_trace_explorer(api_base="/custom/api")
     assert "轨迹观测" in html
-    assert "评估中心" in html
+    assert "Long Tasks" in html
+    assert "Wiki" in html
+    assert "Evaluations" in html
 
     assert "TELOS Traces" in html
     assert 'const API="/custom/api"' in html

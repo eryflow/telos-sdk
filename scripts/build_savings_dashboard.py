@@ -1129,8 +1129,10 @@ def render_dashboard(
       </div>
     </div>
     <div class="header-actions">
-      <a class="nav-btn" href="/">Context</a>
-      <a class="nav-btn" href="/traces">Evidence</a>
+      <a class="nav-btn" href="/">Overview</a>
+      <a class="nav-btn" href="/tasks">Long Tasks</a>
+      <a class="nav-btn" href="/knowledge">Wiki</a>
+      <a class="nav-btn" href="/traces">Traces</a>
       <a class="nav-btn" href="/developer">Developer</a>
       <button class="reset-btn" type="button" onclick="telosReset(this)"
               title="Clear the usage log and zero this dashboard">
@@ -1328,7 +1330,7 @@ def _render_empty(title: str, body: str, *,
     <div class="status-body">{body}</div>
   </div>
 
-  <p class="hint"><a class="nav-btn" href="/">Open Context Control Plane</a></p>
+  <p class="hint"><a class="nav-btn" href="/">Open Overview</a></p>
   <p class="hint">{refresh_hint}</p>
 
 </div></div></body></html>
