@@ -5,7 +5,7 @@ import os
 import pytest
 
 from telos.proxy.server import PROXY_APP_KEY, make_app
-from telos.task_run import main as task_run_main
+from telos.task_run import main as task_run_main, record_task_execution_trace
 from telos.tracing import SQLiteTraceStore
 
 
@@ -215,6 +215,8 @@ async def test_control_api_creates_pack_and_reports_handoff_without_guessing(tmp
             assert response.status == 200
             assert detail["task"]["id"] == long_task["id"]
             assert len(detail["executions"]) == 3
+            assert detail["executions"][0]["attempts"][0]["task_execution_id"] == execution["id"]
+            assert "bound_knowledge" in detail
             assert (await (await session.get(
                 base + f"/api/v1/tasks/{long_task['id']}/knowledge"
             )).json())["items"][0]["content"] == "Baseline score is 0.4"
@@ -320,3 +322,19 @@ def test_long_task_launch_injects_the_frozen_execution_context(tmp_path, monkeyp
         resolved = store.get_task_execution(execution["id"])["execution"]
         assert resolved["status"] == "completed"
         assert resolved["trusted"] == 0  # requires a separate evidenced outcome
+        lifecycle = store.list_traces(attempt_id=attempt["id"])["items"]
+        assert lifecycle[0]["task_name"] == "blur"
+        trace_detail = store.get_trace(lifecycle[0]["id"])
+        assert trace_detail["task"]["id"] == task["id"]
+        assert trace_detail["task_execution"]["id"] == execution["id"]
+
+
+def test_completed_task_execution_trace_can_be_backfilled(tmp_path) -> None:
+    with SQLiteTraceStore(tmp_path / "telos.db") as store:
+        task = store.create_task(name="blur", goal="faster blur", contract={})
+        execution = store.create_task_execution(task["id"], harness="codex")
+        attempt = store.create_attempt(task_execution_id=execution["id"], harness="codex")
+        trace_id = record_task_execution_trace(
+            store, store.get_task_execution(execution["id"]), attempt, "ok", exit_code=0,
+        )
+        assert store.get_trace(trace_id)["trace"]["status"] == "ok"

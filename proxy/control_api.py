@@ -194,12 +194,18 @@ class ControlAPI:
         task = self.store.get_task(task_id)
         if task is None:
             return web.json_response({"error": "task not found"}, status=404)
+        executions = self.store.list_task_executions(task_id)
+        for execution in executions:
+            run = self.store.get_task_run(execution["task_run_id"])
+            execution["attempts"] = [] if run is None else run["attempts"]
+            execution["traces"] = [] if run is None else run["traces"]
         return web.json_response({
             "task": task,
             "current_state": task.get("current_state"),
             "current_agent": task.get("current_agent"),
-            "executions": self.store.list_task_executions(task_id),
+            "executions": executions,
             "knowledge": self.store.list_task_knowledge(task_id),
+            "bound_knowledge": self.store.list_task_bound_knowledge(task_id),
             "skills": self.store.list_task_skills(task_id),
             "agent_revisions": self.store.list_task_agent_revisions(task_id),
         })

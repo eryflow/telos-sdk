@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import time
 
 from telos.config import telos_home
 from telos.evolution import create_profile
@@ -49,6 +50,45 @@ def task_execution_prompt(detail: dict) -> str:
         ),
     ]
     return "\n\n".join(sections)
+
+
+def record_task_execution_trace(
+    store: SQLiteTraceStore, detail: dict, attempt: dict, status: str,
+    *, exit_code: int | None = None,
+) -> str:
+    """Keep every Long Task visible even when native Harness tracing is unavailable."""
+    execution, task = detail["execution"], detail["task"]
+    thread_id = f"task-execution-thread:{execution['id']}"
+    trace_id = f"task-execution-trace:{execution['id']}"
+    timestamp = time.time_ns() // 1_000
+    started = int(execution["created_at_us"])
+    thread = {
+        "id": thread_id, "harness": execution["harness"],
+        "external_id": thread_id, "name": task["name"], "status": status,
+        "start_time_us": started, "attempt_id": attempt["id"],
+        "metadata": {"task_id": task["id"], "task_execution_id": execution["id"]},
+    }
+    trace = {
+        "id": trace_id, "thread_id": thread_id, "harness": execution["harness"],
+        "source": "telos-task-launcher", "external_id": trace_id,
+        "name": task["name"], "status": status, "start_time_us": started,
+        "attempt_id": attempt["id"], "input": {"goal": task["goal"]},
+        "source_updated_at_us": timestamp,
+    }
+    if status != "running":
+        trace.update(end_time_us=timestamp, output={"exit_code": exit_code})
+        thread["end_time_us"] = timestamp
+    if status == "running":
+        store.upsert_thread(thread)
+        store.upsert_trace(trace)
+    else:
+        if store.get_thread(thread_id) is None:
+            store.upsert_thread({
+                **thread, "status": "running", "end_time_us": None,
+            })
+        store.upsert_trace(trace)
+        store.upsert_thread(thread)
+    return trace_id
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -106,6 +146,9 @@ def main(argv: list[str] | None = None) -> int:
             store.set_attempt_status(attempt["id"], "running")
             if execution_detail:
                 store.set_task_execution_status(attempt["task_execution_id"], "running")
+                record_task_execution_trace(
+                    store, execution_detail, attempt, "running",
+                )
             os.chdir(workspace)
             os.environ["TELOS_ATTEMPT_ID"] = attempt["id"]
             os.environ["TELOS_TASK_PLUGINS"] = json.dumps(
@@ -124,6 +167,10 @@ def main(argv: list[str] | None = None) -> int:
             if execution_detail:
                 store.set_task_execution_status(
                     attempt["task_execution_id"], "failed" if result else "completed",
+                )
+                record_task_execution_trace(
+                    store, execution_detail, attempt, "error" if result else "ok",
+                    exit_code=result,
                 )
             return result
         task = ensure_task_profile(store, args.task, home)

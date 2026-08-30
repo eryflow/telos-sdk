@@ -21,6 +21,10 @@ def test_context_control_is_goal_first_and_uses_public_routes() -> None:
     assert "/task-executions/${encodeURIComponent(button.dataset.execution)}/outcome" in html
     assert "/task-skills/${encodeURIComponent(button.dataset.promoteSkill)}/promote" in html
     assert "/task-agent-revisions/${encodeURIComponent(button.dataset.promoteAgent)}/promote" in html
+    assert 'data-open-task="${esc(item.task_id||\'\')}"' in html
+    assert "Acceptance conditions" in html
+    assert "tab.setAttribute('role','tab')" in html
+    assert "Knowledge / Wiki" in html
     assert all(label in html for label in (
         "Overview", "State", "Executions", "Skills", "Agent", "Evidence", "Evolution",
     ))

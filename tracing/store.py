@@ -1027,6 +1027,11 @@ class SQLiteTraceStore:
             ).fetchall()
         return [self._decode_control_row(row) for row in rows]
 
+    def list_task_bound_knowledge(self, task_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            self._validate_reference("tasks", task_id, "task_id")
+            return self._task_knowledge_manifest(task_id)
+
     def add_task_knowledge(
         self, task_id: str, *, kind: str, content: Any, execution_id: str,
         status: str = "proposed", source_refs: Iterable[Any] | None = None,
@@ -1578,7 +1583,7 @@ class SQLiteTraceStore:
             raise ValueError("limit must be between 1 and 200")
         with self._lock:
             rows = self._connection.execute(
-                """SELECT r.*,tt.name AS task_type_name,
+                """SELECT r.*,tt.name AS task_type_name,t.name AS long_task_name,
                           COUNT(DISTINCT a.id) AS attempt_count,
                           COUNT(DISTINCT p.id) AS pack_count,
                           (SELECT harness FROM attempts latest
@@ -1586,6 +1591,7 @@ class SQLiteTraceStore:
                            ORDER BY latest.created_at_us DESC,latest.id DESC LIMIT 1)
                           AS runtime
                    FROM task_runs r LEFT JOIN task_types tt ON tt.id=r.task_type_id
+                   LEFT JOIN tasks t ON t.id=r.task_id
                    LEFT JOIN attempts a ON a.task_run_id=r.id
                    LEFT JOIN context_packs p ON p.task_run_id=r.id
                    GROUP BY r.id ORDER BY r.created_at_us DESC,r.id DESC LIMIT ?""",
@@ -2504,12 +2510,17 @@ class SQLiteTraceStore:
             values.extend((cursor_start, cursor_start, cursor_id))
         clause = " WHERE " + " AND ".join(where) if where else ""
         query = f"""
-            SELECT t.*,
+            SELECT t.*,a.task_execution_id,r.task_id,lt.name AS task_name,
+                   lt.goal AS task_goal,
                    COALESCE(SUM(s.input_tokens),0) AS input_tokens_total,
                    COALESCE(SUM(s.output_tokens),0) AS output_tokens_total,
                    COALESCE(SUM(s.cost_usd_micros),0) AS cost_usd_micros_total,
                    COUNT(s.id) AS span_count
-            FROM traces t LEFT JOIN spans s ON s.trace_id=t.id
+            FROM traces t
+            LEFT JOIN spans s ON s.trace_id=t.id
+            LEFT JOIN attempts a ON a.id=t.attempt_id
+            LEFT JOIN task_runs r ON r.id=a.task_run_id
+            LEFT JOIN tasks lt ON lt.id=r.task_id
             {clause}
             GROUP BY t.id ORDER BY t.start_time_us DESC,t.id DESC LIMIT ?
         """
@@ -2541,6 +2552,17 @@ class SQLiteTraceStore:
             task_run = None if attempt is None else self._connection.execute(
                 "SELECT * FROM task_runs WHERE id=?", (attempt["task_run_id"],)
             ).fetchone()
+            task_execution = None if attempt is None or attempt["task_execution_id"] is None else (
+                self._connection.execute(
+                    "SELECT * FROM task_executions WHERE id=?",
+                    (attempt["task_execution_id"],),
+                ).fetchone()
+            )
+            task = None if task_run is None or task_run["task_id"] is None else (
+                self._connection.execute(
+                    "SELECT * FROM tasks WHERE id=?", (task_run["task_id"],)
+                ).fetchone()
+            )
             context_pack = None if trace["context_pack_id"] is None else self._connection.execute(
                 "SELECT * FROM context_packs WHERE id=?", (trace["context_pack_id"],)
             ).fetchone()
@@ -2553,6 +2575,10 @@ class SQLiteTraceStore:
             "feedback_scores": [dict(row) for row in feedback],
             "attempt": None if attempt is None else self._decode_control_row(attempt),
             "task_run": None if task_run is None else self._decode_control_row(task_run),
+            "task": None if task is None else self._decode_control_row(task),
+            "task_execution": (
+                None if task_execution is None else self._decode_control_row(task_execution)
+            ),
             "context_pack": (
                 None if context_pack is None else self._decode_control_row(context_pack)
             ),

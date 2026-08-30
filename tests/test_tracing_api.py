@@ -134,6 +134,8 @@ async def test_tracing_batch_read_api_and_page(tmp_path) -> None:
             html = await page.text()
             assert "TELOS Traces" in html
             assert "initialAttempt=new URLSearchParams(location.search).get('attempt_id')" in html
+            assert "Long Task: ${data.task.name}" in html
+            assert "Long Task · ${t.task_name}" in html
             assert "<option>abandoned</option>" in html
             assert "<option>unknown</option>" in html
             assert 'href="/">' in html
