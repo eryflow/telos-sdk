@@ -185,7 +185,7 @@ def test_find_active_synthetic_feedback_and_pragmas(tmp_path) -> None:
 
     connection = sqlite3.connect(path)
     try:
-        assert connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 3
+        assert connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 4
     finally:
         connection.close()
 

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from aiohttp import ClientSession, web
+import os
 import pytest
 
 from telos.proxy.server import PROXY_APP_KEY, make_app
+from telos.task_run import main as task_run_main
+from telos.tracing import SQLiteTraceStore
 
 
 @pytest.mark.asyncio
@@ -58,5 +61,199 @@ async def test_control_api_creates_pack_and_reports_handoff_without_guessing(tmp
             lineage = await response.json()
             assert lineage["task_run"]["goal"] == "fix persistent tabs"
             assert lineage["packs"][0]["id"] == pack["id"]
+
+            response = await session.post(
+                base + "/api/v1/task-runs",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "goal": "inspect the failing trajectory",
+                    "runtime": "kimi-code",
+                    "workspace": str(tmp_path),
+                    "plugins": ["tracing", "context-pack"],
+                },
+            )
+            created = await response.json()
+            assert response.status == 201
+            assert created["attempt"]["harness"] == "kimi-code"
+            assert created["attempt"]["status"] == "planned"
+            assert created["attempt"]["launch_plan"]["plugins"] == [
+                "tracing", "context-pack",
+            ]
+            assert created["command_display"] == (
+                f"telos run launch {created['attempt']['id']}"
+            )
+
+            response = await session.get(base + "/api/v1/tasks")
+            assert response.status == 200
+            assert (await response.json())["items"] == []  # TaskRun is not a Long Task
+
+            response = await session.post(
+                base + "/api/v1/tasks",
+                json={"name": "Optimize scorer", "goal": "Improve the score repeatedly"},
+            )
+            assert response.status == 401
+            response = await session.post(
+                base + "/api/v1/tasks",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "name": "Bad flag", "goal": "Must be rejected",
+                    "workspace": {"root": str(tmp_path)}, "self_evolve": "false",
+                },
+            )
+            assert response.status == 400
+            response = await session.post(
+                base + "/api/v1/tasks",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "name": "Bad workspace", "goal": "Must be rejected",
+                    "workspace": {"path": str(tmp_path)},
+                },
+            )
+            assert response.status == 400
+            response = await session.post(
+                base + "/api/v1/tasks",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "name": "Optimize scorer",
+                    "goal": "Improve the score repeatedly",
+                    "contract": {"acceptance_constraints": ["score > baseline"]},
+                    "workspace": str(tmp_path),
+                },
+            )
+            long_task = await response.json()
+            assert response.status == 201
+            assert long_task["name"] == "Optimize scorer"
+
+            response = await session.post(
+                base + f"/api/v1/tasks/{long_task['id']}/executions",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"harness": "codex"},
+            )
+            launched = await response.json()
+            assert response.status == 201
+            execution = launched["execution"]
+            assert execution["task_id"] == long_task["id"]
+            assert launched["attempt"]["task_execution_id"] == execution["id"]
+            assert launched["command_display"] == (
+                f"telos run launch {launched['attempt']['id']}"
+            )
+            response = await session.post(
+                base + f"/api/v1/tasks/{long_task['id']}/evolve",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"execution_id": execution["id"], "knowledge": [], "skills": []},
+            )
+            assert response.status == 400
+            assert "trusted execution outcome" in (await response.json())["error"]
+
+            response = await session.post(
+                base + f"/api/v1/tasks/{long_task['id']}/state-patches",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "state": {"status": "running", "next_action": "measure baseline"},
+                    "task_execution_id": execution["id"],
+                    "evidence_refs": ["trace:test"],
+                },
+            )
+            assert response.status == 201
+
+            response = await session.post(
+                base + f"/api/v1/tasks/{long_task['id']}/knowledge",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "kind": "fact", "content": "Baseline score is 0.4",
+                    "execution_id": execution["id"], "source_refs": ["trace:test"],
+                },
+            )
+            assert response.status == 201
+            response = await session.post(
+                base + f"/api/v1/tasks/{long_task['id']}/skills",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "name": "measure-score", "content": "Run the scorer and record it",
+                    "execution_refs": [execution["id"]],
+                },
+            )
+            assert response.status == 400  # one execution may add knowledge, not a Skill
+            assert "three distinct trusted executions" in (await response.json())["error"]
+
+            response = await session.get(base + f"/api/v1/tasks/{long_task['id']}")
+            detail = await response.json()
+            assert response.status == 200
+            assert detail["task"]["id"] == long_task["id"]
+            assert len(detail["executions"]) == 1
+            assert (await (await session.get(
+                base + f"/api/v1/tasks/{long_task['id']}/knowledge"
+            )).json())["items"][0]["content"] == "Baseline score is 0.4"
+
+            response = await session.post(
+                base + "/api/v1/wiki/pages",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"title": "Scoring experiments", "category": "domains"},
+            )
+            page = await response.json()
+            assert response.status == 201
+            claims = []
+            for content in ("Baseline is 0.4", "Candidate is 0.6"):
+                response = await session.post(
+                    base + "/api/v1/wiki/claims",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={
+                        "page_id": page["id"], "kind": "fact",
+                        "content": content, "source_refs": ["trace:test"],
+                    },
+                )
+                assert response.status == 201
+                claims.append(await response.json())
+            response = await session.post(
+                base + "/api/v1/wiki/relations",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "source_claim_id": claims[1]["id"],
+                    "target_claim_id": claims[0]["id"],
+                    "relation": "applies-to",
+                },
+            )
+            assert response.status == 201
+            response = await session.post(
+                base + f"/api/v1/tasks/{long_task['id']}/knowledge-bindings",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"claim_ids": [claims[0]["id"]]},
+            )
+            manifest = await response.json()
+            assert response.status == 201
+            assert manifest[0]["id"] == claims[0]["id"]
+            response = await session.get(base + "/api/v1/wiki/graph")
+            graph = await response.json()
+            assert response.status == 200
+            assert len(graph["claims"]) == 2
+            assert graph["relations"][0]["relation"] == "applies-to"
+            assert (await session.get(base + "/__telos/api/v1/tasks")).status == 200
+            assert (await session.get(base + "/__telos/api/v1/wiki/graph")).status == 200
     finally:
         await runner.cleanup()
+
+
+def test_dashboard_attempt_launch_reuses_the_existing_identity(tmp_path, monkeypatch) -> None:
+    with SQLiteTraceStore(tmp_path / "telos.db") as store:
+        run = store.create_task_run(goal="reuse this task", workspace={"root": str(tmp_path)})
+        attempt = store.create_attempt(task_run_id=run["id"], harness="codex")
+
+    launched = []
+    monkeypatch.setattr("telos.task_run.telos_home", lambda: tmp_path)
+    monkeypatch.setattr("telos.task_run.os.chdir", lambda path: launched.append(str(path)))
+    monkeypatch.setattr(
+        "telos.cli._cmd_launch_harness",
+        lambda runtime, arguments, replace: launched.extend([runtime, arguments, replace]) or 0,
+    )
+    monkeypatch.setenv("TELOS_ATTEMPT_ID", "")
+    monkeypatch.setenv("TELOS_TASK_PLUGINS", "")
+
+    assert task_run_main(["launch", attempt["id"]]) == 0
+    assert launched == [
+        str(tmp_path), "codex",
+        ["exec", "--approve-for-me", "--skip-git-repo-check", "reuse this task"],
+        False,
+    ]
+    assert os.environ["TELOS_TASK_PLUGINS"] == "[]"
+    with SQLiteTraceStore(tmp_path / "telos.db") as store:
+        assert store.get_attempt(attempt["id"])["status"] == "ok"

@@ -55,7 +55,7 @@ flowchart LR
     O -. "manual promote / rollback" .-> H
 ```
 
-`TaskType → TaskRun → Attempt` owns task identity above Harness sessions. An immutable Context Pack captures objective, policy, progress, memory, normalized conversation, workspace state, and provenance; Trace trees remain the evidence layer. Open `http://127.0.0.1:7171/` for the Context Control Plane and `.../traces` for raw evidence.
+An ordinary Conversation may create a compatibility `TaskRun`, but only an explicit `Task → TaskExecution → Attempt` owns durable Goal, State, `agent.md`, Knowledge and Skills. Each Execution freezes those revisions; Trace trees remain evidence rather than trusted State. Open `http://127.0.0.1:7171/` for Conversations, Long Tasks, the Wiki knowledge graph and evaluations, or `.../traces` for raw evidence.
 
 <a id="what-ships-today"></a>
 
@@ -70,6 +70,7 @@ flowchart LR
 | Deterministic Context Pack, `.telosbundle`, secret/path/checksum validation | **Available** |
 | Codex ↔ Kimi handoff with explicit capability degradation and Attempt lineage | **Available** |
 | Context/Runs/Evolution/Evidence local control plane | **Available** |
+| Explicit Long Tasks, audited State revisions, Wiki injection, and local knowledge graph | **Available** |
 | Frozen private/public cases, recursive evidence-driven Candidates, repeated cross-Harness gates, promote/rollback | **Available** |
 | SFT, preference, and RL JSONL export | **Available** |
 

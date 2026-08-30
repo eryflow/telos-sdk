@@ -16,6 +16,7 @@ Subcommands:
 - ``telos pack``          create, validate, export, or import a Context Pack
 - ``telos handoff``       continue a TaskRun in a different Harness
 - ``telos run``           create and inspect TaskRuns/Attempts
+- ``telos task``          explicitly create and advance long-horizon Tasks
 - ``telos evolve``        configure offline self-evolution for a task type
 - ``telos trace-hook``    internal tracing hook runner installed into Harnesses
 - ``telos proxy``         (hidden alias) run the gateway blocking in the foreground, equivalent to the old telos proxy
@@ -24,6 +25,7 @@ Subcommands:
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import webbrowser
 
@@ -89,6 +91,9 @@ def main(argv: list[str] | None = None) -> int:
     if subcommand == "run":
         from telos.task_run import main as task_run_main
         return task_run_main(rest)
+    if subcommand == "task":
+        from telos.long_task import main as long_task_main
+        return long_task_main(rest)
     if subcommand == "evolve":
         from telos.evolve import main as evolve_main
         return evolve_main(rest)
@@ -279,8 +284,10 @@ def _cmd_bare() -> int:
     return _cmd_launch_harness(chosen)
 
 
-def _cmd_launch_harness(name: str) -> int:
-    """Resolve the harness executable, inject the gateway environment, and ``exec`` into its CLI."""
+def _cmd_launch_harness(
+    name: str, arguments: list[str] | None = None, *, replace: bool = True,
+) -> int:
+    """Resolve a harness, inject the gateway environment, and launch its CLI."""
     from telos.config import load_config
     from telos.harnesses import executable_path, gateway_env, get_spec
 
@@ -314,8 +321,11 @@ def _cmd_launch_harness(name: str) -> int:
     print(f"→ entering {spec.display_name}{suffix}")
     sys.stdout.flush()
     sys.stderr.flush()
+    command = [exe, *(arguments or [])]
     try:
-        os.execvpe(exe, [exe], child_env)  # does not return
+        if not replace:
+            return subprocess.run(command, env=child_env, check=False).returncode
+        os.execvpe(exe, command, child_env)  # does not return
     except OSError as e:  # noqa: BLE001
         print(f"error: failed to launch {exe}: {e}", file=sys.stderr)
         return 1
@@ -785,6 +795,7 @@ def _print_usage() -> None:
         "  pack        create/inspect/export/import an immutable Context Pack\n"
         "  handoff     checkpoint and continue the TaskRun in another Harness\n"
         "  run         create/list/show/finish TaskRuns and initial Attempts\n"
+        "  task        explicitly create/list/show/execute/checkpoint long Tasks\n"
         "  evolve      evaluate, promote, and roll back Agent Profile revisions\n"
         "  showcase    offline narrated demo + interactive playground (--interactive / --cast)\n"
         "\n"
@@ -800,6 +811,7 @@ def _print_usage() -> None:
         "  telos alias claude-code\n"
         "  telos pack --attempt <attempt-id> --done 'reproduced' --next 'patch'\n"
         "  telos run start --task code-fix --goal 'fix tabs' --harness codex\n"
+        "  telos task create --name optimizer --goal-file goal.md\n"
         "  telos handoff kimi-code --pack <pack-id>\n"
         "  telos evolve --task 'code defect repair'\n"
         "  telos                       # enter the favorite harness\n"

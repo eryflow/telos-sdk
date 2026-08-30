@@ -290,17 +290,20 @@ Overview | State | Executions | Knowledge | Skills | Agent | Evidence | Evolutio
 
 ## 示例
 
-“一家四口准备一次露营清单”通常是普通对话，不应自动创建 Task。
+“怎样给一张照片添加背景模糊”通常是普通对话，不应自动创建 Task。
 
-“持续管理家庭每周膳食与采购”可以由用户显式创建为 Task：
+参考 OpenEvolve 官方 [`background_blur`](https://github.com/algorithmicsuperintelligence/openevolve/tree/main/examples/background_blur)，用户可以显式创建“持续优化视频人像背景虚化热点函数”Task：
 
-- Goal：每周生成符合过敏、预算、库存和日程约束的菜单及采购清单；
-- State：本周库存、已确认日程、待补信息、上周反馈、下一次执行时间；
-- Knowledge：家庭成员过敏、口味、消耗速度、常用商店；
-- Skills：库存核对、人数/天数换算、菜单与采购清单联动；
-- `agent.md`：稳定的计划、复核、询问用户和状态更新规则；
-- Execution：每周日启动一次，固定使用当时的 State/Knowledge/Skill/Agent revision；
-- Self-evolve：先更新家庭知识，再沉淀稳定采购 Skill，最后才调整 `agent.md`。
+- Goal：从正确但缓慢的 `O(k²)` 二维高斯卷积开始，在画质硬门禁内最大化速度；
+- Contract：mean SSIM ≥ 0.98、worst-frame ≥ 0.95、worst-region ≥ 0.90，任一失败得 `0`；
+- State：当前最佳候选、轮次、MAP-Elites 单元、未解决失败、质量/速度和下一步；
+- Knowledge：stale background 作弊模式、局部损伤风险、有效优化和计时陷阱；
+- Skills：经多次 Execution 验证的 cascade evaluation、对抗测试和交错计时；
+- `agent.md`：稳定的质量优先、证据更新和失败处理规则，不保存具体候选或指标；
+- Execution：每轮固定 State/Knowledge/Skill/Agent revision，保存候选 diff、三级评估、artifacts 和 Trace；
+- Self-evolve：先记录失败/成功 Knowledge，再沉淀验证过的 Skill，最后才处理残余 `agent.md` 行为问题。
+
+详细过程见 [`self-evolution-background-blur-task.md`](../self-evolution-background-blur-task.md)。
 
 ## 验收
 

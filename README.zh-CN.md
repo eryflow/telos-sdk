@@ -55,7 +55,7 @@ flowchart LR
     O -. "人工发布 / 回滚" .-> H
 ```
 
-`TaskType → TaskRun → Attempt` 在 Harness Session 之上持有任务身份。不可变 Context Pack 保存目标、策略、进度、记忆、规范化对话、工作区和来源；Trace 树只作为证据层。Context Control Plane 位于 `http://127.0.0.1:7171/`，原始证据位于 `.../traces`。
+普通 Conversation 可以产生兼容用的 `TaskRun`，但只有用户显式创建的 `Task → TaskExecution → Attempt` 才持有长期 Goal、State、`agent.md`、Knowledge 和 Skills。每次 Execution 冻结实际使用的 revision；Trace 树只作为证据，不能直接充当可信 State。`http://127.0.0.1:7171/` 提供 Conversations、Long Tasks、Wiki 知识图谱和评测，原始证据位于 `.../traces`。
 
 <a id="what-ships-today"></a>
 
@@ -70,6 +70,7 @@ flowchart LR
 | 确定性 Context Pack、`.telosbundle`、secret/path/checksum 校验 | **已可用** |
 | Codex ↔ Kimi handoff、显式能力降级与 Attempt 谱系 | **已可用** |
 | Context/Runs/Evolution/Evidence 本地控制面 | **已可用** |
+| 显式 Long Task、审计 State revision、Wiki 注入与本地知识图谱 | **已可用** |
 | 公私隔离的冻结样本、递归证据驱动 Candidate、多次跨 Harness 质量门、发布与回滚 | **已可用** |
 | SFT、Preference 与 RL JSONL 导出 | **已可用** |
 

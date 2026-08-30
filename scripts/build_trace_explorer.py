@@ -15,7 +15,7 @@ _HTML = r'''<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>TELOS Traces</title>
+  <title>TELOS Traces · 轨迹观测</title>
   <style>
     :root{color-scheme:dark;--bg:#0b0d12;--panel:#11151d;--line:#252b38;--muted:#8d96a8;--text:#edf1f7;--blue:#6aa6ff;--green:#47c78b;--red:#ff6b78;--amber:#efb64b}
     *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 ui-sans-serif,system-ui,-apple-system,sans-serif}button,input,select{font:inherit;color:inherit}button{cursor:pointer}
@@ -34,19 +34,19 @@ _HTML = r'''<!doctype html>
   </style>
 </head>
 <body>
-<div class="shell"><aside class="side"><div class="brand"><i>T</i>TELOS</div><div class="workspace-pill"><small>Workspace</small><strong>Local agent lab</strong></div><nav><div class="nav-label">Observe</div><a href="/"><span class="nav-icon">⌂</span><span>Overview</span></a><a href="/runs"><span class="nav-icon">≡</span><span>Task runs</span></a><a class="active" href="/traces"><span class="nav-icon">⌁</span><span>Evidence</span></a><div class="nav-label">Improve</div><a href="/evolution"><span class="nav-icon">↗</span><span>Evolution</span></a><div class="nav-label">System</div><a href="/savings"><span class="nav-icon">◫</span><span>Savings</span></a><a href="/developer"><span class="nav-icon">⌘</span><span>Developer</span></a></nav><div class="side-foot">Portable context.<br>Immutable evidence.</div></aside><div class="content">
-<header><b>Evidence traces</b><span class="muted">Inspect full span trees and score failures</span><span class="grow"></span><span id="health" class="muted">connecting…</span></header>
+<div class="shell"><aside class="side"><div class="brand"><i>T</i>TELOS</div><div class="workspace-pill"><small>Workspace</small><strong>Local agent lab</strong></div><nav><div class="nav-label">工作台</div><a href="/"><span class="nav-icon">⌂</span><span>首页</span></a><a href="/runs"><span class="nav-icon">≡</span><span>多任务</span></a><div class="nav-label">观测与评估</div><a class="active" href="/traces"><span class="nav-icon">⌁</span><span>轨迹观测</span></a><a href="/evaluations"><span class="nav-icon">↗</span><span>评估中心</span></a><div class="nav-label">系统</div><a href="/savings"><span class="nav-icon">◫</span><span>节省分析</span></a><a href="/developer"><span class="nav-icon">⌘</span><span>开发者</span></a></nav><div class="side-foot">Portable context.<br>Immutable evidence.</div></aside><div class="content">
+<header><b>轨迹观测</b><span class="muted">逐步检查模型请求、工具调用、Token、成本与失败原因</span><span class="grow"></span><span id="health" class="muted">connecting…</span></header>
 <div class="filters">
-  <input id="search" type="search" placeholder="Search traces" aria-label="Search traces">
-  <select id="project" aria-label="Project"><option value="">All projects</option></select>
-  <select id="harness" aria-label="Harness"><option value="">All harnesses</option><option>codex</option><option>kimi-code</option><option>deepseek-harness</option></select>
-  <select id="status" aria-label="Status"><option value="">All statuses</option><option>running</option><option>ok</option><option>error</option><option>cancelled</option><option>abandoned</option><option>unknown</option></select>
-  <input id="model" placeholder="Exact model" aria-label="Model">
+  <input id="search" type="search" placeholder="搜索轨迹、输入或输出" aria-label="搜索轨迹">
+  <select id="project" aria-label="项目"><option value="">全部项目</option></select>
+  <select id="harness" aria-label="Runtime"><option value="">全部 runtime</option><option>codex</option><option>kimi-code</option><option>deepseek-harness</option></select>
+  <select id="status" aria-label="状态"><option value="">全部状态</option><option>running</option><option>ok</option><option>error</option><option>cancelled</option><option>abandoned</option><option>unknown</option></select>
+  <input id="model" placeholder="模型" aria-label="模型">
   <input id="from" type="datetime-local" aria-label="Started after">
   <input id="to" type="datetime-local" aria-label="Started before">
-  <button id="refresh">Refresh</button>
+  <button id="refresh">刷新</button>
 </div>
-<main><section class="list"><div class="thead"><span>Name</span><span>Harness</span><span>Status</span><span class="optional">Duration</span><span class="optional">Tokens</span><span class="optional">Cost</span><span>Started</span></div><div id="rows"></div><div id="list-empty" class="empty">No traces yet</div><div class="load-wrap"><button id="load-more" class="load-more" hidden>Load more</button></div></section><section id="detail" class="detail"><div class="empty">Select a trace</div></section></main></div></div>
+<main><section class="list"><div class="thead"><span>轨迹</span><span>Runtime</span><span>状态</span><span class="optional">耗时</span><span class="optional">Tokens</span><span class="optional">成本</span><span>开始时间</span></div><div id="rows"></div><div id="list-empty" class="empty">还没有轨迹</div><div class="load-wrap"><button id="load-more" class="load-more" hidden>加载更多</button></div></section><section id="detail" class="detail"><div class="empty">选择一条轨迹查看 Span 瀑布图</div></section></main></div></div>
 <script type="module">
 const API=__API_BASE__, $=s=>document.querySelector(s), initialAttempt=new URLSearchParams(location.search).get('attempt_id'); let selectedId=null, selectedSpan=null, selectedInspectorTab='Input', currentDetail=null, nextCursor=null;
 const escTime=us=>us?new Date(us/1000).toLocaleString():'—';

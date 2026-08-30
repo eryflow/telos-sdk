@@ -256,6 +256,8 @@ telos dashboard --static                 build a static token-savings report
 
 telos run start --task TYPE --goal GOAL --harness HARNESS
 telos run list|show|finish   own one TaskRun across Harness Attempts
+telos task create --name NAME --goal-file goal.md
+telos task list|show|execute|checkpoint|evolve
 telos pack [--attempt ID]   create a semantic checkpoint (uses TELOS_ATTEMPT_ID by default)
 telos pack inspect ID
 telos pack export ID -o task.telosbundle
@@ -289,7 +291,27 @@ TELOS separates three facts that must not be mixed:
 - an **Agent Profile Revision** is immutable long-term behavior for a TaskType;
 - a **Trace** is evidence of what one Attempt actually did.
 
-Start a task through TELOS so Harness hooks inherit an explicit Attempt identity:
+It also separates ordinary executions from durable Tasks. `telos run start` creates a
+compatibility TaskRun for one execution; it never creates a Long Task or enables
+self-evolution. Only `telos task create`, the Long Tasks Dashboard form, or the
+authenticated `/api/v1/tasks` endpoint explicitly creates a durable Task:
+
+```bash
+telos task create \
+  --name background-blur-optimizer \
+  --goal "make portrait background blur faster without crossing the quality gate" \
+  --workspace ./background-blur
+
+telos task execute <task-id> --harness codex --no-exec
+```
+
+Every Task owns its Goal/Contract, immutable State revisions, `agent.md`, Knowledge,
+Skills and Executions. Each Execution freezes the revisions it uses. Verified evidence
+evolves in the order `Knowledge → Skill → agent.md`; a Skill Candidate requires three
+distinct trusted Executions, and `agent.md` changes remain candidates until explicitly
+promoted.
+
+Start an ordinary execution through TELOS so Harness hooks inherit an explicit Attempt identity:
 
 ```bash
 telos run start \
@@ -397,7 +419,7 @@ The runner reads the public Case/Profile/Harness/Run payload and must echo `harn
 
 The export command writes `sft.jsonl`, `preference.jsonl`, and `rl.jsonl`, each retaining immutable evidence identifiers.
 
-For a concrete long-running example, see [the family weekly meal-planning self-evolution task](self-evolution-family-meal-planning-task.md).
+For a concrete long-running example, see [the OpenEvolve-inspired background-blur self-evolution task](self-evolution-background-blur-task.md).
 
 ---
 

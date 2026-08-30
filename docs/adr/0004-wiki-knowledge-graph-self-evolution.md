@@ -174,7 +174,7 @@ POST /api/v1/wiki/pages/{id}/forget
 ```json
 {
   "nodes": [
-    {"id": "page-1", "type": "page", "label": "花生过敏", "namespace": "people", "status": "verified"}
+    {"id": "page-1", "type": "page", "label": "stale background", "namespace": "lessons", "status": "verified"}
   ],
   "edges": [
     {"id": "rel-1", "source": "page-1", "target": "page-2", "relation": "applies-to", "source_count": 2}
@@ -243,11 +243,11 @@ Extractor/Retriever Profile 的 Candidate 必须在冻结任务上评估这些�
 
 ## 端到端验收
 
-1. 显式创建“持续管理家庭每周膳食与采购”Task，首次 Execution 后生成一个待审核 ChangeSet；
-2. Wiki 中出现“花生过敏”“家庭口味”“库存核对方法”，每条可下钻到来源；
-3. 图谱展示家庭成员、健康约束、每周采购和核对方法的关系；
-4. 新证据声称“孩子可以吃花生”时不覆盖旧事实，而是进入冲突审核；
-5. 显式创建“家庭野餐”Task 时检索到过敏事实和出行检查法，但不注入无关项目知识；
+1. 参考 OpenEvolve 官方 [`background_blur`](https://github.com/algorithmicsuperintelligence/openevolve/tree/main/examples/background_blur)，显式创建“持续优化视频人像背景虚化”Task，首次 Execution 后生成待审核 ChangeSet；
+2. Wiki 出现“二维高斯卷积为 `O(k²)`”“stale background 会留下局部残影”“worst-region SSIM 能捕获局部损伤”等 Claim，每条可下钻到候选 diff、artifact 和 Trace；
+3. 图谱展示优化策略、质量指标、作弊模式、性能瓶颈和证据的关系；
+4. 新候选声称 stale background 是有效优化时不覆盖现有失败模式，而是建立冲突并进入审核；
+5. 新的背景虚化 Execution 检索到画质硬门、cascade evaluation 和 baseline/candidate 交错计时知识，但不注入无关 Task 的知识；
 6. Context Pack 固定记录实际使用的 Claim revision/digest；
 7. 用户能从图谱打开 Wiki、查看证据、修订或遗忘知识；
 8. 未审核敏感知识、contested Claim 和无来源 Claim 不进入任务上下文。

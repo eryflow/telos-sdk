@@ -2637,10 +2637,15 @@ def make_app(
         app.router.add_post("/__telos/tracing/v1/batch", tracing_api.batch)
         app.router.add_get("/", control_api.page)
         app.router.add_get("/runs", control_api.page)
+        app.router.add_get("/tasks", control_api.page)
+        app.router.add_get("/knowledge", control_api.page)
         app.router.add_get("/evolution", control_api.page)
+        app.router.add_get("/evaluations", control_api.page)
         app.router.add_get("/traces", tracing_api.page)
         app.router.add_get("/__telos", control_api.page)
         app.router.add_get("/__telos/", control_api.page)
+        app.router.add_get("/__telos/tasks", control_api.page)
+        app.router.add_get("/__telos/knowledge", control_api.page)
         app.router.add_get("/__telos/traces", tracing_api.page)
         app.router.add_get("/api/v1/projects", tracing_api.projects)
         app.router.add_get("/api/v1/traces", tracing_api.traces)
@@ -2659,8 +2664,38 @@ def make_app(
             "/__telos/api/v1/feedback-scores", tracing_api.feedback,
         )
         app.router.add_get("/__telos/api/v1/task-runs", control_api.task_runs)
+        app.router.add_post("/__telos/api/v1/task-runs", control_api.task_runs)
         app.router.add_get("/api/v1/task-runs", control_api.task_runs)
+        app.router.add_post("/api/v1/task-runs", control_api.task_runs)
         app.router.add_get("/api/v1/task-runs/{run_id}", control_api.task_run)
+        app.router.add_get("/api/v1/tasks", control_api.tasks)
+        app.router.add_post("/api/v1/tasks", control_api.tasks)
+        app.router.add_get("/api/v1/tasks/{task_id}", control_api.task)
+        app.router.add_post(
+            "/api/v1/tasks/{task_id}/executions", control_api.task_executions,
+        )
+        app.router.add_post(
+            "/api/v1/tasks/{task_id}/state-patches", control_api.task_state_patches,
+        )
+        app.router.add_get(
+            "/api/v1/tasks/{task_id}/knowledge", control_api.task_knowledge,
+        )
+        app.router.add_post(
+            "/api/v1/tasks/{task_id}/knowledge", control_api.task_knowledge,
+        )
+        app.router.add_get("/api/v1/tasks/{task_id}/skills", control_api.task_skills)
+        app.router.add_post("/api/v1/tasks/{task_id}/skills", control_api.task_skills)
+        app.router.add_post(
+            "/api/v1/tasks/{task_id}/knowledge-bindings",
+            control_api.task_knowledge_bindings,
+        )
+        app.router.add_post("/api/v1/tasks/{task_id}/evolve", control_api.task_evolve)
+        app.router.add_get("/api/v1/wiki/pages", control_api.wiki_pages)
+        app.router.add_post("/api/v1/wiki/pages", control_api.wiki_pages)
+        app.router.add_get("/api/v1/wiki/pages/{page_id}", control_api.wiki_page)
+        app.router.add_get("/api/v1/wiki/graph", control_api.wiki_graph)
+        app.router.add_post("/api/v1/wiki/claims", control_api.wiki_claims)
+        app.router.add_post("/api/v1/wiki/relations", control_api.wiki_relations)
         app.router.add_get("/api/v1/packs", control_api.packs)
         app.router.add_post("/api/v1/packs", control_api.packs)
         app.router.add_get("/api/v1/packs/{pack_id}", control_api.pack)
@@ -2673,6 +2708,45 @@ def make_app(
         app.router.add_post("/api/v1/profile-revisions/{revision_id}/promote", control_api.promote)
         app.router.add_post("/api/v1/task-types/{task_type_id}/rollback", control_api.rollback)
         app.router.add_get("/__telos/api/v1/task-runs/{run_id}", control_api.task_run)
+        app.router.add_get("/__telos/api/v1/tasks", control_api.tasks)
+        app.router.add_post("/__telos/api/v1/tasks", control_api.tasks)
+        app.router.add_get("/__telos/api/v1/tasks/{task_id}", control_api.task)
+        app.router.add_post(
+            "/__telos/api/v1/tasks/{task_id}/executions", control_api.task_executions,
+        )
+        app.router.add_post(
+            "/__telos/api/v1/tasks/{task_id}/state-patches",
+            control_api.task_state_patches,
+        )
+        app.router.add_get(
+            "/__telos/api/v1/tasks/{task_id}/knowledge", control_api.task_knowledge,
+        )
+        app.router.add_post(
+            "/__telos/api/v1/tasks/{task_id}/knowledge", control_api.task_knowledge,
+        )
+        app.router.add_get(
+            "/__telos/api/v1/tasks/{task_id}/skills", control_api.task_skills,
+        )
+        app.router.add_post(
+            "/__telos/api/v1/tasks/{task_id}/skills", control_api.task_skills,
+        )
+        app.router.add_post(
+            "/__telos/api/v1/tasks/{task_id}/knowledge-bindings",
+            control_api.task_knowledge_bindings,
+        )
+        app.router.add_post(
+            "/__telos/api/v1/tasks/{task_id}/evolve", control_api.task_evolve,
+        )
+        app.router.add_get("/__telos/api/v1/wiki/pages", control_api.wiki_pages)
+        app.router.add_post("/__telos/api/v1/wiki/pages", control_api.wiki_pages)
+        app.router.add_get(
+            "/__telos/api/v1/wiki/pages/{page_id}", control_api.wiki_page,
+        )
+        app.router.add_get("/__telos/api/v1/wiki/graph", control_api.wiki_graph)
+        app.router.add_post("/__telos/api/v1/wiki/claims", control_api.wiki_claims)
+        app.router.add_post(
+            "/__telos/api/v1/wiki/relations", control_api.wiki_relations,
+        )
         app.router.add_get("/__telos/api/v1/packs", control_api.packs)
         app.router.add_post("/__telos/api/v1/packs", control_api.packs)
         app.router.add_get("/__telos/api/v1/packs/{pack_id}", control_api.pack)
